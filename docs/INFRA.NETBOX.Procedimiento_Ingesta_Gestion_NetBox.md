@@ -151,6 +151,7 @@
 <div class="doc-section-title">1. Principios de Modelado y Relaciones en NetBox</div>
 
 NetBox funciona como una **Fuente Única de Verdad (Source of Truth - SoT)** con un modelo relacional estricto de integridad referencial. A diferencia de una hoja de cálculo o base de datos plana:
+
 - No es posible instanciar un dispositivo (`Device`) sin un Sitio (`Site`), un Rol (`Device Role`) y un Modelo de Hardware (`Device Type`) previamente registrados.
 - No es posible asignar una dirección IP (`IP Address`) a una interfaz sin haber creado previamente el prefijo contenedor (`Prefix`) o la interfaz de destino.
 - El catálogo de hardware (`Device Types`) actúa como plantilla reutilizable que define de antemano el número y nomenclatura de interfaces físicas, módulos de fuente y puertos de consola.
@@ -189,6 +190,7 @@ Establece el marco geográfico, administrativo y físico donde residen los recur
 <div class="doc-subsection-title">3.1. Inquilinos y Departamentos (Tenancy)</div>
 
 Si la compañía gestiona múltiples entidades, clientes, departamentos o unidades de negocio:
+
 - **Tenant Groups**: Agrupaciones lógicas de alto nivel (ej: *Departamentos Internos*, *Clientes Cloud*, *Sociedades Filiales*).
 - **Tenants**: Entidad propietaria directa de los recursos (ej: *IT Infraestructura*, *Finanzas*, *Empresa_A*).
 
@@ -335,6 +337,7 @@ Instanciación de la infraestructura física en los bastidores.
 <div class="doc-subsection-title">7.1. Registro de Dispositivos (Devices)</div>
 
 Al crear un equipo en NetBox se seleccionan los componentes de las fases anteriores:
+
 - **Nombre / Hostname**: `SW-MAD-CORE-01`, `FW-MAD-PERIM-01`, `SRV-ESXI-MAD-01`.
 - **Asignación Física**: `Site` $\rightarrow$ `Location` $\rightarrow$ `Rack` $\rightarrow$ `Posición U` y `Face` (Frontal/Trasera).
 - **Asignación Lógica**: `Device Type`, `Role`, `Platform`, `Status` (Active, Staged, Offline).
@@ -342,6 +345,7 @@ Al crear un equipo en NetBox se seleccionan los componentes de las fases anterio
 <div class="doc-subsection-title">7.2. Configuración de Interfaces Físicas</div>
 
 Las interfaces se crean automáticamente desde el `Device Type`. En esta fase se ajusta su configuración L2:
+
 - **Modo 802.1Q**: `Access` (Untagged VLAN asignada) o `Tagged` / `Trunk` (Tagged VLANs permitidas).
 - **LAG / LACP**: Agrupación de interfaces físicas en Port-Channels / Bonds (`Bond0`, `Port-Channel1`).
 

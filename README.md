@@ -13,3 +13,9 @@ uv run pytest
 # Ingesta en modo dry-run
 uv run python src/ingest_organization.py --dry-run
 ```
+
+## Documentación y Hoja de Ruta
+
+- [Procedimiento Maestro de Ingesta y Gestión de NetBox](docs/INFRA.NETBOX.Procedimiento_Ingesta_Gestion_NetBox.md)
+- [Backlog Técnico y Hoja de Ruta Futura](docs/INFRA.NETBOX.Roadmap_y_Backlog_Futuro.md)
+
