@@ -53,7 +53,10 @@ class NetBoxClient:
 
         try:
             with urllib.request.urlopen(req) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                raw = resp.read().decode("utf-8")
+                if not raw:
+                    return {}
+                return json.loads(raw)
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8")
             raise RuntimeError(f"HTTP {e.code} en {url}: {err_body}") from e

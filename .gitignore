@@ -10,3 +10,7 @@ build/
 .env
 inputs/
 *.code-workspace
+
+# Enlaces simbólicos locales a proyectos dependientes
+docs/direccionamiento
+docs/infra-redes-docs
