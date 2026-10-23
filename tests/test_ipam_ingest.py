@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock
-from ingest_ipam import (
+from netbox_ingest.runners.ingest_ipam import (
     generate_spoke_prefixes_and_vlans,
     build_ipam_catalog,
     run_ingest,
@@ -17,10 +17,10 @@ from netbox_ingest.ipam_definitions import (
 
 
 def test_standard_vlans_count():
-    """Valida que la plantilla estándar cuente exactamente con 8 VLANs."""
-    assert len(STANDARD_VLANS) == 8
+    """Valida que la plantilla estándar cuente exactamente con 9 VLANs."""
+    assert len(STANDARD_VLANS) == 9
     vids = [v["vid"] for v in STANDARD_VLANS]
-    assert vids == [10, 20, 30, 40, 50, 60, 80, 90]
+    assert vids == [10, 11, 20, 30, 40, 50, 60, 80, 90]
 
 
 def test_generate_spoke_prefixes_and_vlans():
@@ -36,18 +36,19 @@ def test_generate_spoke_prefixes_and_vlans():
     assert container["status"] == "container"
     assert container["site_slug"] == "delegacion-alcala-de-henares"
 
-    assert len(vlans) == 8
-    assert len(subnets) == 8
+    assert len(vlans) == 9
+    assert len(subnets) == 9
 
     # Verificar coincidencia de subredes esperadas
     expected_subnets = [
         "10.157.10.0/24",  # VLAN 10
-        "10.157.11.0/24",  # VLAN 20
-        "10.157.12.0/24",  # VLAN 30
+        "10.157.11.0/24",  # VLAN 11
+        "10.157.12.0/24",  # VLAN 20
+        "10.157.13.0/24",  # VLAN 30
         "10.157.14.0/24",  # VLAN 40
         "10.157.15.0/24",  # VLAN 50
         "10.157.16.0/24",  # VLAN 60
-        "10.157.17.0/24",  # VLAN 80
+        "10.157.17.0/25",  # VLAN 80
         "10.157.18.0/24",  # VLAN 90
     ]
     generated_subnets = [s["prefix"] for s in subnets]
@@ -70,8 +71,8 @@ def test_build_ipam_catalog():
     expected_vlan_groups = len(HUB_SITES) + len(SPOKE_SITES)
     assert len(catalog["vlan_groups"]) == expected_vlan_groups
 
-    # VLANs: 8 por cada Hub y Spoke
-    expected_vlans = expected_vlan_groups * 8
+    # VLANs: 9 por cada Hub y Spoke
+    expected_vlans = expected_vlan_groups * 9
     assert len(catalog["vlans"]) == expected_vlans
 
     # Prefijos:

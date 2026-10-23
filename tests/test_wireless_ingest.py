@@ -1,5 +1,5 @@
 import pytest
-from ingest_wireless_lans import (
+from netbox_ingest.runners.ingest_wireless_lans import (
     WIRELESS_LAN_GROUPS,
     WIRELESS_LANS,
     get_wifi_interface_type,

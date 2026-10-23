@@ -22,3 +22,8 @@ packages = ["src/netbox_ingest"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "openpyxl>=3.1.5",
+]

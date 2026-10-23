@@ -142,3 +142,19 @@ Se desarrollará un manual operativo orientado tanto a consultores/auditores ext
   3. **Mecanismos de Sincronización**:
      - **NetBox Webhooks hacia n8n / Freshservice API**: Ante cualquier creación, actualización o baja en NetBox, emitir un webhook HTTP hacia un workflow que actualice el activo correspondiente en Freshservice vía API REST o MCP (`freshservice-mcp`).
      - **Script de Sincronización Programado (`sync_netbox_to_freshservice.py`)**: Barrido diario o bajo demanda que concilia altas y cambios de estado de forma masiva e idempotente.
+
+---
+
+## 5. Secuencia de Ejecución Completa: Optimización Nativa y Usabilidad
+
+Hoja de ruta secuencial y ordenada para desplegar la optimización de NetBox (Opción 1), garantizando consistencia de datos, soporte de diagramación y entrega de asistentes operativos:
+
+| Paso | Denominación | Acciones Clave | Entregables / Verificación |
+| :--- | :--- | :--- | :--- |
+| **Paso 0** | **Reorganización Estructural de Código (`src/`)** | • Separación de paquetes: `netbox_core/`, `netbox_ingest/` y `netbox_automation/`.<br>• Módulos de compatibilidad hacia atrás.<br>• Actualización de suite de pruebas unitarias. | • Tests pasando al 100% (`33 passed`).<br>• `src-layout` limpio conforme a gobernanza. |
+| **Paso 1** | **Conectividad L1/L2 Mínima en Sede Piloto (Esplandiú)** | • Registrar cableado de infraestructura en Sede 1 (`Oficina Madrid - Esplandiú`).<br>• Trazar troncal Firewall `FGT100-JES` $\longleftrightarrow$ Switches.<br>• Trazar uplinks entre switches.<br>• Conectar interfaces PoE de los 11 APs a puertos de conmutación. | • `dcim/cables` creados en NetBox.<br>• Base de relaciones físicas lista para los motores de topología. |
+| **Paso 2** | **Despliegue y Validación del Motor Topológico (`nextbox-ui-plugin`)** | • Incorporar `nextbox-ui-plugin>=1.0.7` en el Dockerfile (`edx-netbox-custom`).<br>• Hornear estáticos (`collectstatic`) y compilar para `linux/arm64`.<br>• Publicar imagen en ECR y actualizar ECS Task Definition (`netbox-prod`).<br>• Activar plugin en `extra.py` / `PLUGINS`. | • Menú Topología con motor NextUI operativo.<br>• Renderizado jerárquico verificado en Sede Esplandiú. |
+| **Paso 3** | **Configuración de Vistas Persistentes (Saved Views & Bookmarks)** | • Crear *Saved Filters* predefinidos por Sede (Esplandiú, Hubs, Sedes críticas).<br>• Crear *Custom Links* en el menú de navegación para acceso inmediato a topologías y listados sin rellenar filtros manuales. | • Acceso a la topología y recursos de sede en 1 solo clic. |
+| **Paso 4** | **Desarrollo de Asistentes Operativos (NetBox Custom Scripts)** | • Construir scripts GUI en `src/netbox_automation/custom_scripts/`: <br>  1. `DeviceWizard`: Alta atómica (Equipo + Interfaces + IP libre asignada).<br>  2. `IPAMQuickAllocate`: Reserva inmediata de próxima IP por VLAN.<br>  3. `DeviceLifecycle`: Reasignación de sede o baja/liberación limpia de IPs. | • Formularios nativos disponibles en `Customization > Scripts`.<br>• Reducción de 6 pantallas a 1 formulario por operativa. |
+| **Paso 5** | **Pruebas de Aceptación, Documentación y Pase a Producción** | • Validación de flujos con usuarios finales.<br>• Comprobación de auditoría y compatibilidad con SSO Microsoft Entra ID.<br>• Actualización de manuales operativos (`docs/`). | • Pliego de requerimientos validado.<br>• Cierre y entrega del proyecto de optimización. |
+

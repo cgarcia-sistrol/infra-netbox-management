@@ -1,6 +1,6 @@
 import pytest
 import ipaddress
-from ingest_access_points import MODEL_MAPPING, resolve_site_and_mask
+from netbox_ingest.runners.ingest_access_points import MODEL_MAPPING, resolve_site_and_mask
 
 
 def test_model_mapping_complete():

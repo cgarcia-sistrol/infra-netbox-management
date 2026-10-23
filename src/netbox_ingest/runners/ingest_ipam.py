@@ -68,8 +68,9 @@ def generate_spoke_prefixes_and_vlans(
         }
         vlans.append(vlan_item)
 
+        mask = vlan_def.get("mask", "/24")
         subnet_item = {
-            "prefix": f"10.{octet}.{third}.0/24",
+            "prefix": f"10.{octet}.{third}.0{mask}",
             "status": "active",
             "role_slug": role_slug,
             "site_slug": site_slug,
