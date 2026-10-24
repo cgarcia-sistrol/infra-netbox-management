@@ -23,6 +23,7 @@ MANAGED_SCRIPTS = [
     "dcim_01_device_wizard.py",
     "dcim_02_device_lifecycle.py",
     "ipam_01_quick_allocate.py",
+    "vpn_01_b2b_provisioner.py",
 ]
 
 

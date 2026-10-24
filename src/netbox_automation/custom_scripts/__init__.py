@@ -9,9 +9,11 @@ Contiene los asistentes de interfaz gráfica para optimización operativa:
 from netbox_automation.custom_scripts.dcim_01_device_wizard import DeviceWizard
 from netbox_automation.custom_scripts.dcim_02_device_lifecycle import DeviceLifecycle
 from netbox_automation.custom_scripts.ipam_01_quick_allocate import IPAMQuickAllocate
+from netbox_automation.custom_scripts.vpn_01_b2b_provisioner import B2BVPNProvisioner
 
 __all__ = [
     "DeviceWizard",
     "DeviceLifecycle",
     "IPAMQuickAllocate",
+    "B2BVPNProvisioner",
 ]

@@ -21,7 +21,15 @@ try:
         MultiObjectVar,
     )
     from dcim.models import Device, DeviceType, DeviceRole, Site, Interface, Cable  # type: ignore
-    from ipam.models import IPAddress, Prefix, VLAN  # type: ignore
+    from ipam.models import IPAddress, Prefix, VLAN, VRF, Role  # type: ignore
+    from tenancy.models import Tenant  # type: ignore
+    from extras.models import Tag  # type: ignore
+    try:
+        from vpn.models import Tunnel, TunnelGroup, TunnelTermination  # type: ignore
+    except ImportError:
+        Tunnel = None  # type: ignore
+        TunnelGroup = None  # type: ignore
+        TunnelTermination = None  # type: ignore
     from utilities.exceptions import AbortScript  # type: ignore
     IS_NETBOX_ENV = True
 
@@ -128,6 +136,7 @@ except ImportError:
     class MockModelBase:
         def __init__(self, **kwargs):
             self.id = kwargs.get("id", 1)
+            self.tags = kwargs.get("tags", [])
             for k, v in kwargs.items():
                 setattr(self, k, v)
             self._saved = False
@@ -141,7 +150,28 @@ except ImportError:
             self._deleted = True
 
         def __str__(self):
-            return getattr(self, "name", getattr(self, "model", str(self.id)))
+            return getattr(self, "name", getattr(self, "model", getattr(self, "prefix", getattr(self, "address", str(self.id)))))
+
+    class Tag(MockModelBase):  # type: ignore
+        name: str = "Mock Tag"
+        slug: str = "mock-tag"
+        color: str = "3b82f6"
+        description: str = ""
+
+    class Tenant(MockModelBase):  # type: ignore
+        name: str = "Mock Tenant"
+        slug: str = "mock-tenant"
+        description: str = ""
+
+    class VRF(MockModelBase):  # type: ignore
+        name: str = "VRF-B2B-EXT"
+        rd: str = "64000:6598"
+        description: str = ""
+
+    class Role(MockModelBase):  # type: ignore
+        name: str = "B2B Extranet / NAT"
+        slug: str = "b2b-extranet-nat"
+        description: str = ""
 
     class Site(MockModelBase):  # type: ignore
         name: str = "Mock Site"
@@ -189,11 +219,18 @@ except ImportError:
         assigned_object: Any = None
         description: str = ""
         dns_name: str = ""
+        role: Any = None
+        tenant: Any = None
+        vrf: Any = None
 
     class Prefix(MockModelBase):  # type: ignore
         prefix: str = "10.0.0.0/24"
         site: Any = None
         status: str = "active"
+        role: Any = None
+        tenant: Any = None
+        vrf: Any = None
+        description: str = ""
         _next_ip: Optional[str] = "10.0.0.10/24"
 
         def __str__(self):
@@ -217,6 +254,27 @@ except ImportError:
         termination_a: Any = None
         termination_b: Any = None
         status: str = "connected"
+
+    class TunnelGroup(MockModelBase):  # type: ignore
+        name: str = "VPNs-B2B-Extranet"
+        slug: str = "vpns-b2b-extranet"
+        description: str = ""
+
+    class Tunnel(MockModelBase):  # type: ignore
+        name: str = "to-mock"
+        status: str = "active"
+        encapsulation: str = "ipsec-tunnel"
+        tunnel_group: Any = None
+        tenant: Any = None
+        description: str = ""
+        comments: str = ""
+
+    class TunnelTermination(MockModelBase):  # type: ignore
+        tunnel: Any = None
+        role: str = "peer"
+        termination_type: str = "dcim.interface"
+        termination_id: Optional[int] = None
+        outside_ip: Any = None
 
     class Script:  # type: ignore
         class Meta:
