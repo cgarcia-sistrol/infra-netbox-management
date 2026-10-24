@@ -112,6 +112,7 @@ Este playbook documenta la operativa de los asistentes unificados desarrollados 
 <table class="doc-table">
   <thead>
     <tr>
+      <th>Módulo / Prefijo</th>
       <th>Asistente</th>
       <th>Clase Python</th>
       <th>Función Operativa Principal</th>
@@ -120,22 +121,25 @@ Este playbook documenta la operativa de los asistentes unificados desarrollados 
   </thead>
   <tbody>
     <tr>
+      <td><code>dcim_01_device_wizard.py</code></td>
       <td><strong>1. Alta de Dispositivo</strong></td>
       <td><code>DeviceWizard</code></td>
       <td>Alta atómica de equipo, interfaz física y reserva/asignación de IP libre.</td>
       <td>De 6 pantallas a 1 formulario (~85% menos tiempo).</td>
     </tr>
     <tr>
-      <td><strong>2. Reserva Rápida IPAM</strong></td>
-      <td><code>IPAMQuickAllocate</code></td>
-      <td>Localización y reserva de la próxima IP libre en una subred con opción de enlace a equipo.</td>
-      <td>De 4 pasos de búsqueda a 1 clic.</td>
-    </tr>
-    <tr>
-      <td><strong>3. Ciclo de Vida</strong></td>
+      <td><code>dcim_02_device_lifecycle.py</code></td>
+      <td><strong>2. Ciclo de Vida</strong></td>
       <td><code>DeviceLifecycle</code></td>
       <td>Reubicación de sede, baja operativa (decommissioning) o purga con desconexión limpia de cables e IPs.</td>
       <td>Cero registros huérfanos o cables colgando.</td>
+    </tr>
+    <tr>
+      <td><code>ipam_01_quick_allocate.py</code></td>
+      <td><strong>1. Reserva Rápida IPAM</strong></td>
+      <td><code>IPAMQuickAllocate</code></td>
+      <td>Localización y reserva de la próxima IP libre en una subred con opción de enlace a equipo.</td>
+      <td>De 4 pasos de búsqueda a 1 clic.</td>
     </tr>
   </tbody>
 </table>
@@ -160,7 +164,7 @@ Los asistentes se encuentran accesibles para usuarios autenticados en el menú l
 
 <div class="doc-section-title">3. Detalle Operativo por Asistente</div>
 
-<div class="doc-subsection-title">3.1. Asistente 1: DeviceWizard (Alta Atómica de Dispositivo)</div>
+<div class="doc-subsection-title">3.1. Dominio DCIM: Asistente 1 - DeviceWizard (Alta Atómica de Dispositivo)</div>
 
 Permite registrar un nuevo dispositivo físico o virtual asegurando la coherencia completa de relaciones.
 
@@ -168,7 +172,7 @@ Permite registrar un nuevo dispositivo físico o virtual asegurando la coherenci
    - **Sede (`site`)**: Desplegable con buscador AJAX de sedes registradas (ej. *Oficina Madrid - Esplandiú*).
    - **Rol (`device_role`)**: Desplegable de roles homologados (*Switch*, *Firewall*, *Access Point*, *Server*, etc.).
    - **Modelo (`device_type`)**: Selector del catálogo de modelos (ej. *FortiSwitch-148F*, *U6 Pro*).
-   - **Nombre / Hostname (`name`)**: Identificador único corporativo (ej. `SW-ESPLAN-02`).
+   - **Nombre / Hostname (`device_name`)**: Identificador único corporativo (ej. `SW-ESPLAN-02`).
    - **Número de Serie (`serial`)** y **Asset Tag (`asset_tag`)**: Opcionales para inventario.
    - **Interfaz de Gestión (`interface_name`)**: Puerto físico principal (por defecto `eth0`).
    - **Subred IPAM (`prefix`)**: Si se selecciona, el asistente extrae automáticamente la primera IP libre disponible.
@@ -180,23 +184,7 @@ Permite registrar un nuevo dispositivo físico o virtual asegurando la coherenci
 
 ---
 
-<div class="doc-subsection-title">3.2. Asistente 2: IPAMQuickAllocate (Reserva Rápida de IPs)</div>
-
-Diseñado para resolver solicitudes de red inmediatas (ej. reservar IP fija para una impresora, cámara o servidor).
-
-1. **Campos del Formulario**:
-   - **Prefijo / Subred (`prefix`)**: Selector del rango IPAM correspondiente a la sede/VLAN.
-   - **Descripción / Propósito (`description`)**: Motivo de la asignación (ej. *Impresora Multifunción Planta 2*).
-   - **Nombre DNS (`dns_name`)**: Opcional, para preconfigurar FQDN.
-   - **Estado de la IP (`status`)**: `active`, `reserved` o `dhcp`.
-   - **Dispositivo Destino (`device`)**: Opcional. Si se indica, asocia inmediatamente la IP a la interfaz del equipo.
-   - **Designar como Primary IP (`set_as_primary`)**: Si el equipo no tenía IP primaria, la establece como tal.
-2. **Control de Errores**:
-   - Si la subred está al 100% de utilización, el script aborta limpiamente (`AbortScript`) avisando que el prefijo está agotado.
-
----
-
-<div class="doc-subsection-title">3.3. Asistente 3: DeviceLifecycle (Ciclo de Vida y Bajas)</div>
+<div class="doc-subsection-title">3.2. Dominio DCIM: Asistente 2 - DeviceLifecycle (Ciclo de Vida y Bajas)</div>
 
 Previene el "drift" de infraestructura y asegura que al dar de baja o mover un equipo no queden cables huérfanos o IPs asignadas a equipos inexistentes.
 
@@ -209,18 +197,54 @@ Previene el "drift" de infraestructura y asegura que al dar de baja o mover un e
 
 ---
 
-<div class="doc-section-title">4. Procedimiento de Despliegue en NetBox (ECS / Producción)</div>
+<div class="doc-subsection-title">3.3. Dominio IPAM: Asistente 1 - IPAMQuickAllocate (Reserva Rápida de IPs)</div>
 
-Para que los scripts aparezcan en el menú `Customization > Scripts` del contenedor NetBox en producción:
+Diseñado para resolver solicitudes de red inmediatas (ej. reservar IP fija para una impresora, cámara o servidor).
 
-1. **Estructura de Archivos en Contenedor**:
-   - NetBox carga los scripts ubicados en su variable `SCRIPTS_ROOT` (por defecto `/opt/netbox/netbox/scripts/`).
-2. **Inyección en Imagen Docker (`edx-netbox-custom`)**:
-   - Los archivos de `src/netbox_automation/custom_scripts/` se copian al directorio de scripts durante el build de la imagen o mediante montaje de volumen persistente en la tarea ECS.
-3. **Verificación de Carga**:
-   - Acceder a NetBox con credenciales de administrador.
-   - Navegar a `Customization > Scripts`.
-   - Verificar la presencia de los tres módulos:
-     1. *1. Alta de Dispositivo (Device Wizard)*
-     2. *2. Reserva Rápida IPAM (Quick Allocate)*
-     3. *3. Ciclo de Vida de Dispositivo (Lifecycle & Decommission)*
+1. **Campos del Formulario**:
+   - **Prefijo / Subred (`prefix`)**: Selector del rango IPAM correspondiente a la sede/VLAN.
+   - **Descripción / Propósito (`purpose`)**: Motivo de la asignación (ej. *Impresora Multifunción Planta 2*).
+   - **Nombre DNS (`dns_name`)**: Opcional, para preconfigurar FQDN.
+   - **Estado de la IP (`status`)**: `active`, `reserved` o `dhcp`.
+   - **Dispositivo Destino (`device`)**: Opcional. Si se indica, asocia inmediatamente la IP a la interfaz del equipo.
+   - **Designar como Primary IP (`set_as_primary`)**: Si el equipo no tenía IP primaria, la establece como tal.
+2. **Control de Errores**:
+   - Si la subred está al 100% de utilización, el script aborta limpiamente (`AbortScript`) avisando que el prefijo está agotado.
+
+---
+
+<div class="doc-section-title">4. Procedimiento de Despliegue y Sincronización en NetBox</div>
+
+NetBox dispone de dos mecanismos complementarios para el despliegue de Custom Scripts:
+
+<div class="doc-subsection-title">4.1. Sincronización Dinámica en Caliente (Recomendada / 0 Downtime)</div>
+
+Mediante la API nativa de NetBox (`/api/extras/scripts/upload/`), los scripts se publican o actualizan de forma instantánea sin requerir rebuild de Docker ni reinicio de contenedores en ECS:
+
+```bash
+uv run python scripts/netbox/sync_custom_scripts.py
+```
+
+- **Idempotente**: Aplica `PUT` in-place si el script ya existe o `POST` si es nuevo.
+- **Inmediato**: Los cambios se reflejan en tiempo real en la GUI web.
+
+<div class="doc-subsection-title">4.2. Inyección Inmutable en Imagen Docker (Producción Base)</div>
+
+Durante la compilación de la imagen `edx-netbox-custom` en `/home/carlos/projects-edx/aws/netbox-deployment/docker/`, los scripts quedan horneados en `/etc/netbox/scripts/` y `/opt/netbox/netbox/scripts/`:
+
+```bash
+cd /home/carlos/projects-edx/aws/netbox-deployment/docker
+./build_and_push.sh
+```
+
+---
+
+<div class="doc-section-title">5. Enlaces Directos de Acceso en Producción</div>
+
+Los asistentes se encuentran operativos y agrupados por dominio funcional en:
+
+- 🪄 **dcim_01_device_wizard**: [https://netbox.infra.edison.es/extras/scripts/4/](https://netbox.infra.edison.es/extras/scripts/4/)
+- 🔄 **dcim_02_device_lifecycle**: [https://netbox.infra.edison.es/extras/scripts/5/](https://netbox.infra.edison.es/extras/scripts/5/)
+- 🌐 **ipam_01_quick_allocate**: [https://netbox.infra.edison.es/extras/scripts/6/](https://netbox.infra.edison.es/extras/scripts/6/)
+- 📋 **Catálogo Completo**: [https://netbox.infra.edison.es/extras/scripts/](https://netbox.infra.edison.es/extras/scripts/)
+

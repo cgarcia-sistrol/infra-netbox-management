@@ -251,11 +251,25 @@ GLOBAL_CONTAINER_PREFIXES: List[Dict[str, Any]] = [
         "description": "Red corporativa de plantas solares y generación fotovoltaica",
     },
     {
-        "prefix": "100.64.0.0/10",
+        "prefix": "100.96.0.0/16",
         "status": "container",
         "role_slug": "b2b-extranet-nat",
         "vrf_name": "VRF-B2B-EXT",
-        "description": "Espacio CGNAT RFC 6598 reservado para traducciones DNAT/SNAT con terceros",
+        "description": "Vertiente 2 - NAT Interno | Infra: .0/24 | Redes Internas B2B: .1.0/24 - .199.0/24 (JIT) | Hosts Internos: .200.0/24 | Reserva: .201.0/24 - .255.0/24",
+    },
+    {
+        "prefix": "100.97.0.0/16",
+        "status": "container",
+        "role_slug": "b2b-extranet-nat",
+        "vrf_name": "VRF-B2B-EXT",
+        "description": "Vertiente 3: Outbound NAT 1:1 exclusivo para Red Fotovoltaica 172.20.0.0/16",
+    },
+    {
+        "prefix": "100.98.0.0/16",
+        "status": "container",
+        "role_slug": "b2b-extranet-nat",
+        "vrf_name": "VRF-B2B-EXT",
+        "description": "Vertiente 4 - NAT Externo | Reserva/Infra: .0/24 | Redes Externas Terceros: .1.0/24 - .199.0/24 (JIT) | Hosts Externos: .200.0/24 | Reserva: .201.0/24 - .255.0/24",
     },
 ]
 

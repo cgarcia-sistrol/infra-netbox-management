@@ -196,8 +196,17 @@ except ImportError:
         status: str = "active"
         _next_ip: Optional[str] = "10.0.0.10/24"
 
+        def __str__(self):
+            return self.prefix
+
         def get_first_available_ip(self):
             return self._next_ip
+
+        def get_available_ips(self):
+            if self._next_ip:
+                ip_clean = self._next_ip.split("/")[0]
+                return [ip_clean]
+            return []
 
     class VLAN(MockModelBase):  # type: ignore
         vid: int = 10

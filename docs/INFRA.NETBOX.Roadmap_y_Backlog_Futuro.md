@@ -147,6 +147,16 @@ Se desarrollará un manual operativo orientado tanto a consultores/auditores ext
      - **NetBox Webhooks hacia n8n / Freshservice API**: Ante cualquier creación, actualización o baja en NetBox, emitir un webhook HTTP hacia un workflow que actualice el activo correspondiente en Freshservice vía API REST o MCP (`freshservice-mcp`).
      - **Script de Sincronización Programado (`sync_netbox_to_freshservice.py`)**: Barrido diario o bajo demanda que concilia altas y cambios de estado de forma masiva e idempotente.
 
+### 4.4 Arquitectura de Despliegue Dinámico de Scripts e Informes sin Recompilación (Backlog Técnico)
+- **Problemática**: La inyección de Custom Scripts y Reports mediante compilación de imagen Docker (`edx-netbox-custom`) requiere recompilar y desplegar una nueva imagen en ECR para cualquier ajuste o adición de formularios, incurriendo en tiempos de ciclo y reinicio de contenedores.
+- **Solución de Arquitectura Futura**:
+  - **Montaje de Volumen Persistente en ECS**:
+    - Configurar en el módulo Terraform `netbox_service` un volumen `netbox-scripts` asociado a una ruta del host EC2 (`/etc/netbox-config/scripts`) o a un sistema de archivos elástico **Amazon EFS**.
+    - Montar dicho volumen en `/opt/netbox/netbox/scripts/` en los contenedores `netbox-web` y `netbox-worker`.
+  - **Desacoplamiento Operativo**:
+    - El repositorio `netbox-deployment` actuará exclusivamente como plataforma de infraestructura sin tocar código de lógica de red.
+    - El repositorio `infra-netbox-management` publicará directamente los scripts en el volumen compartido mediante pipeline ligero (o SCP/SSM/Data Source), logrando *hot-reloading* inmediato de nuevos asistentes sin alterar imágenes ni requerir downtime en ECS.
+
 ---
 
 ## 5. Secuencia de Ejecución Completa: Optimización Nativa y Usabilidad

@@ -30,12 +30,12 @@ class TestDeviceWizard(unittest.TestCase):
 
     def test_metadata_and_form_fields(self):
         """Verifica que el script expone metadatos y variables correctas para la GUI."""
-        self.assertIn("Device Wizard", DeviceWizard.Meta.name)
+        self.assertIn("1. Alta de Dispositivo", DeviceWizard.Meta.name)
         self.assertFalse(DeviceWizard.Meta.commit_default)
         self.assertTrue(hasattr(DeviceWizard, "site"))
         self.assertTrue(hasattr(DeviceWizard, "device_role"))
         self.assertTrue(hasattr(DeviceWizard, "device_type"))
-        self.assertTrue(hasattr(DeviceWizard, "name"))
+        self.assertTrue(hasattr(DeviceWizard, "device_name"))
         self.assertTrue(hasattr(DeviceWizard, "prefix"))
         self.assertTrue(hasattr(DeviceWizard, "specific_ip"))
 
@@ -45,7 +45,7 @@ class TestDeviceWizard(unittest.TestCase):
             "site": self.site,
             "device_role": self.role,
             "device_type": self.device_type,
-            "name": "SW-ESPLAN-05",
+            "device_name": "SW-ESPLAN-05",
             "serial": "FS148F12345678",
             "asset_tag": "ACT-1005",
             "interface_name": "mgmt0",
@@ -68,7 +68,7 @@ class TestDeviceWizard(unittest.TestCase):
             "site": self.site,
             "device_role": self.role,
             "device_type": self.device_type,
-            "name": "SW-ESPLAN-06",
+            "device_name": "SW-ESPLAN-06",
             "serial": "FS148F99999",
             "interface_name": "eth0",
             "prefix": None,
@@ -92,9 +92,9 @@ class TestIPAMQuickAllocate(unittest.TestCase):
 
     def test_metadata_and_form_fields(self):
         """Verifica metadatos y campos de formulario."""
-        self.assertIn("Quick Allocate", IPAMQuickAllocate.Meta.name)
+        self.assertIn("1. Reserva Rápida IPAM", IPAMQuickAllocate.Meta.name)
         self.assertTrue(hasattr(IPAMQuickAllocate, "prefix"))
-        self.assertTrue(hasattr(IPAMQuickAllocate, "description"))
+        self.assertTrue(hasattr(IPAMQuickAllocate, "purpose"))
         self.assertTrue(hasattr(IPAMQuickAllocate, "device"))
         self.assertTrue(hasattr(IPAMQuickAllocate, "interface_name"))
 
@@ -102,7 +102,7 @@ class TestIPAMQuickAllocate(unittest.TestCase):
         """Prueba reserva asociando a un dispositivo."""
         data = {
             "prefix": self.prefix,
-            "description": "Impresora Planta 2",
+            "purpose": "Impresora Planta 2",
             "dns_name": "printer-p2.infra.edison.es",
             "status": "reserved",
             "device": self.device,
@@ -118,7 +118,7 @@ class TestIPAMQuickAllocate(unittest.TestCase):
         empty_prefix = Prefix(prefix="10.30.0.0/24", _next_ip=None)
         data = {
             "prefix": empty_prefix,
-            "description": "Test Fallo",
+            "purpose": "Test Fallo",
         }
         with self.assertRaises(AbortScript):
             self.allocator.run(data, commit=False)
@@ -132,6 +132,13 @@ class TestDeviceLifecycle(unittest.TestCase):
         self.site_a = Site(name="Sede A", slug="sede-a")
         self.site_b = Site(name="Sede B", slug="sede-b")
         self.device = Device(name="RTR-TEST-01", site=self.site_a, status="active")
+
+    def test_metadata_and_form_fields(self):
+        """Verifica metadatos y campos de formulario."""
+        self.assertIn("2. Ciclo de Vida de Dispositivo", DeviceLifecycle.Meta.name)
+        self.assertTrue(hasattr(DeviceLifecycle, "action"))
+        self.assertTrue(hasattr(DeviceLifecycle, "device"))
+        self.assertTrue(hasattr(DeviceLifecycle, "new_site"))
 
     def test_relocate_requires_new_site(self):
         """Verifica que la acción reubicar exige nueva sede."""

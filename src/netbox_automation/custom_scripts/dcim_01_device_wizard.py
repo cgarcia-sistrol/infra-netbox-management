@@ -5,22 +5,36 @@ en un único formulario atómico dentro de la interfaz web de NetBox (Customizat
 """
 
 from typing import Any, Dict
-from netbox_automation.custom_scripts.base import (
-    Script,
-    ObjectVar,
-    ChoiceVar,
-    StringVar,
-    IPAddressVar,
-    TextVar,
-    Device,
-    DeviceType,
-    DeviceRole,
-    Site,
-    Interface,
-    IPAddress,
-    Prefix,
-    AbortScript,
-)
+
+try:
+    from extras.scripts import (
+        Script,
+        ObjectVar,
+        ChoiceVar,
+        StringVar,
+        IPAddressVar,
+        TextVar,
+    )
+    from dcim.models import Device, DeviceType, DeviceRole, Site, Interface
+    from ipam.models import IPAddress, Prefix
+    from utilities.exceptions import AbortScript
+except ImportError:
+    from netbox_automation.custom_scripts.base import (
+        Script,
+        ObjectVar,
+        ChoiceVar,
+        StringVar,
+        IPAddressVar,
+        TextVar,
+        Device,
+        DeviceType,
+        DeviceRole,
+        Site,
+        Interface,
+        IPAddress,
+        Prefix,
+        AbortScript,
+    )
 
 
 class DeviceWizard(Script):
@@ -50,7 +64,7 @@ class DeviceWizard(Script):
         label="Modelo (Device Type)",
         description="Modelo de hardware homologado en el catálogo.",
     )
-    name = StringVar(
+    device_name = StringVar(
         label="Nombre / Hostname",
         description="Identificador único del equipo (ej. SW-ESPLAN-02).",
     )
@@ -99,7 +113,7 @@ class DeviceWizard(Script):
         site = data["site"]
         role = data["device_role"]
         device_type = data["device_type"]
-        name = data["name"].strip()
+        name = (data.get("device_name") or data.get("name") or "").strip()
         serial = (data.get("serial") or "").strip()
         asset_tag = (data.get("asset_tag") or "").strip()
         interface_name = (data.get("interface_name") or "eth0").strip()
@@ -107,6 +121,10 @@ class DeviceWizard(Script):
         specific_ip = data.get("specific_ip")
         status = data.get("status", "active")
         comments = (data.get("comments") or "").strip()
+
+        if not name:
+            self.log_failure("El campo 'Nombre / Hostname' no puede estar vacío.")
+            raise AbortScript("El nombre del dispositivo es obligatorio.")
 
         mode_str = "PRODUCCIÓN" if commit else "SIMULACIÓN (DRY-RUN)"
         self.log_info(f"Iniciando asistente DeviceWizard en modo [{mode_str}] para '{name}' en '{site}'...")
@@ -130,50 +148,68 @@ class DeviceWizard(Script):
             device.save()
         self.log_success(f"Dispositivo '{name}' (Rol: {role}, Modelo: {device_type}) preparado correctamente.")
 
-        # 2. Creación de Interfaz Física
+        # 2. Creación de Interfaz de Gestión
         interface = Interface(
             device=device,
             name=interface_name,
             type="1000base-t",
-            enabled=True,
+            mgmt_only=True,
+            description=f"Interfaz principal de gestión para {name}",
         )
         if commit:
             interface.save()
-        self.log_success(f"Interfaz física '{interface_name}' asociada al dispositivo.")
+        self.log_success(f"Interfaz de gestión '{interface_name}' configurada.")
 
-        # 3. Resolución y Asignación de IP
-        assigned_ip = None
+        # 3. Determinación de IP (Manual vs Auto-asignada)
+        ip_obj = None
         if specific_ip:
-            ip_str = str(specific_ip)
-            assigned_ip = ip_str
-            self.log_info(f"Utilizando IP manual especificada: {ip_str}")
-        elif prefix:
-            try:
-                available_ip = prefix.get_first_available_ip()
-                if not available_ip:
-                    raise AbortScript(f"No hay direcciones IP libres disponibles en el prefijo {prefix}.")
-                assigned_ip = str(available_ip)
-                self.log_info(f"Auto-reservada próxima IP libre en prefijo {prefix}: {assigned_ip}")
-            except AttributeError:
-                assigned_ip = f"10.0.0.10/24"
-                self.log_info(f"IP simulada para prefijo: {assigned_ip}")
-
-        if assigned_ip:
+            ip_str = str(specific_ip).strip()
+            self.log_info(f"Asignando IP manual configurada: {ip_str}")
             ip_obj = IPAddress(
-                address=assigned_ip,
+                address=ip_str,
                 status="active",
-                assigned_object=interface,
                 description=f"IP de gestión para {name}",
-                dns_name=f"{name.lower()}.infra.edison.es",
             )
+            if commit:
+                ip_obj.save()
+        elif prefix:
+            self.log_info(f"Buscando próxima IP disponible en el prefijo {prefix}...")
+            # NetBox API / Model get_available_ips()
+            available_ips = []
+            if hasattr(prefix, "get_available_ips"):
+                available_ips = prefix.get_available_ips()
+
+            if not available_ips:
+                self.log_failure(f"El prefijo {prefix} no tiene direcciones IP libres disponibles.")
+                raise AbortScript(f"Prefijo {prefix} agotado.")
+
+            next_ip = available_ips[0]
+            mask = str(prefix).split("/")[-1] if "/" in str(prefix) else "24"
+            ip_str = f"{next_ip}/{mask}"
+            self.log_info(f"Auto-reservada próxima IP libre: {ip_str}")
+            ip_obj = IPAddress(
+                address=ip_str,
+                status="active",
+                description=f"IP de gestión para {name}",
+            )
+            if commit:
+                ip_obj.save()
+
+        # 4. Vinculación de IP a la Interfaz y como Primary IPv4
+        if ip_obj:
+            ip_obj.assigned_object = interface
             if commit:
                 ip_obj.save()
                 device.primary_ip4 = ip_obj
                 device.save()
-            self.log_success(f"Dirección IP {assigned_ip} asignada y designada como Primary IPv4.")
-        else:
-            self.log_info("Sin asignación de direccionamiento IP inicial.")
+            self.log_success(f"Dirección IP {ip_obj.address} vinculada como Primary IPv4 a '{name}'.")
 
-        summary_msg = f"Dispositivo '{name}' aprovisionado con éxito en '{site}' (IP: {assigned_ip or 'N/A'})."
-        self.log_success(summary_msg)
-        return summary_msg
+        summary = (
+            f"Alta completada exitosamente:\n"
+            f"- Dispositivo: {name} (ID: {getattr(device, 'id', 'dry-run')})\n"
+            f"- Sede: {site}\n"
+            f"- Interfaz: {interface_name}\n"
+            f"- IP Gestión: {getattr(ip_obj, 'address', 'Ninguna asignada')}\n"
+            f"- Modo: {mode_str}"
+        )
+        return summary
