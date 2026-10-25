@@ -36,7 +36,7 @@ class IPAMQuickAllocate(Script):
     """Asistente para reserva inmediata de IPs libres en prefijos IPAM."""
 
     class Meta:
-        name = "1. Reserva Rápida IPAM (Quick Allocate)"
+        name = "[IPAM] Reserva Rápida IPAM (Quick Allocate)"
         description = (
             "Localiza y reserva de forma atómica la próxima dirección IP libre dentro de un "
             "prefijo de red, con opción de asignación inmediata a interfaz de equipo."

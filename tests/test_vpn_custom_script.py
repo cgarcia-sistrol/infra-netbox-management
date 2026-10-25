@@ -13,7 +13,7 @@ class TestB2BVPNProvisioner(unittest.TestCase):
 
     def test_metadata_and_form_fields(self):
         """Verifica que el script expone metadatos y variables correctas para la GUI."""
-        self.assertIn("Aprovisionamiento B2B VPN & NAT", B2BVPNProvisioner.Meta.name)
+        self.assertIn("[VPN] Aprovisionamiento B2B VPN & NAT", B2BVPNProvisioner.Meta.name)
         self.assertFalse(B2BVPNProvisioner.Meta.commit_default)
 
         # Campos clave
@@ -24,6 +24,7 @@ class TestB2BVPNProvisioner(unittest.TestCase):
         self.assertTrue(hasattr(B2BVPNProvisioner, "peer_ip_secondary"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "vrf_name"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "tunnel_group_name"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "purpose"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "local_prefixes"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "local_nat_enabled"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "local_nat_prefixes"))

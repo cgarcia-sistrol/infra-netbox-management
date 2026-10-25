@@ -12,24 +12,44 @@ soportando:
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from netbox_automation.custom_scripts.base import (
-    IS_NETBOX_ENV,
-    AbortScript,
-    BooleanVar,
-    ChoiceVar,
-    IPAddress,
-    Prefix,
-    Role,
-    Script,
-    StringVar,
-    Tag,
-    Tenant,
-    TextVar,
-    Tunnel,
-    TunnelGroup,
-    TunnelTermination,
-    VRF,
-)
+try:
+    from extras.scripts import (
+        Script,
+        StringVar,
+        ChoiceVar,
+        BooleanVar,
+        TextVar,
+    )
+    from utilities.exceptions import AbortScript
+    from ipam.models import Prefix, IPAddress, VRF, Role
+    from tenancy.models import Tenant
+    from extras.models import Tag
+    try:
+        from vpn.models import Tunnel, TunnelGroup, TunnelTermination
+    except ImportError:
+        Tunnel = None
+        TunnelGroup = None
+        TunnelTermination = None
+    IS_NETBOX_ENV = True
+except ImportError:
+    from netbox_automation.custom_scripts.base import (
+        Script,
+        StringVar,
+        ChoiceVar,
+        BooleanVar,
+        TextVar,
+        AbortScript,
+        Prefix,
+        IPAddress,
+        VRF,
+        Role,
+        Tenant,
+        Tag,
+        Tunnel,
+        TunnelGroup,
+        TunnelTermination,
+    )
+    IS_NETBOX_ENV = False
 
 
 def slugify(text: str) -> str:
@@ -49,7 +69,7 @@ def clean_lines(text: Optional[str]) -> List[str]:
 
 class B2BVPNProvisioner(Script):
     class Meta:
-        name = "4. Aprovisionamiento B2B VPN & NAT"
+        name = "[VPN] Aprovisionamiento B2B VPN & NAT"
         description = (
             "Asistente universal para despliegue de túneles VPN Site-to-Site, "
             "gobernanza de NAT (SNAT/DNAT) y etiquetado cruzado."
@@ -109,7 +129,7 @@ class B2BVPNProvisioner(Script):
         required=True,
     )
 
-    description = StringVar(
+    purpose = StringVar(
         label="8. Propósito del Servicio",
         description="Descripción técnica del túnel (ej. Interconexión SCADA / Telecontrol Plantas FV).",
         required=False,
@@ -161,6 +181,13 @@ class B2BVPNProvisioner(Script):
     # ------------------------------------------------------------------
     # Métodos de Acceso y Persistencia de Objetos
     # ------------------------------------------------------------------
+    def _assign_tags(self, obj: Any, tags: List[Any], commit: bool):
+        if IS_NETBOX_ENV:
+            if commit and hasattr(obj, "tags") and hasattr(obj.tags, "set"):
+                obj.tags.set(tags)
+        else:
+            obj.tags = tags
+
     def _get_or_create_tag(self, name: str, slug: str, color: str, description: str, commit: bool) -> Any:
         if IS_NETBOX_ENV:
             tag, created = Tag.objects.get_or_create(
@@ -187,6 +214,8 @@ class B2BVPNProvisioner(Script):
             return Tenant(name=name, slug=slug, description=f"Proveedor / Cliente B2B: {name}")
 
     def _get_or_create_tunnel_group(self, name: str, commit: bool) -> Any:
+        if not TunnelGroup:
+            return None
         slug = slugify(name)
         if IS_NETBOX_ENV:
             tg, created = TunnelGroup.objects.get_or_create(
@@ -221,7 +250,6 @@ class B2BVPNProvisioner(Script):
         tenant_name: str,
         topology: str,
     ) -> List[Tuple[str, str]]:
-        """Calcula los nombres de túnel según topología, resolviendo nombres."""
         slug_tenant = slugify(tenant_name)
         base = manual_name.strip() if manual_name else f"to-{slug_tenant}"
 
@@ -249,7 +277,7 @@ class B2BVPNProvisioner(Script):
         peer_ip_sec = (data.get("peer_ip_secondary") or "").strip()
         vrf_name = data.get("vrf_name", "VRF-B2B-EXT").strip()
         tunnel_group_name = data.get("tunnel_group_name", "VPNs-B2B-Extranet").strip()
-        purpose_desc = (data.get("description") or "").strip()
+        purpose_desc = (data.get("purpose") or data.get("description") or "").strip()
 
         local_prefixes = clean_lines(data.get("local_prefixes"))
         local_nat_enabled = data.get("local_nat_enabled", False)
@@ -320,10 +348,10 @@ class B2BVPNProvisioner(Script):
                     role=b2b_role,
                     status="active",
                     description=desc,
-                    tags=tags,
                 )
                 if commit:
                     pfx_obj.save()
+                self._assign_tags(pfx_obj, tags, commit)
                 self.log_success(f"[LOCAL NAT] Asignado prefijo {nat_pfx} (Real: {real_pfx})")
                 provisioned_local.append({"real": real_pfx, "nat": nat_pfx, "mode": "SNAT 1:1"})
             else:
@@ -345,10 +373,10 @@ class B2BVPNProvisioner(Script):
                         role=b2b_role,
                         status="active",
                         description=desc,
-                        tags=tags,
                     )
                     if commit:
                         ip_obj.save()
+                    self._assign_tags(ip_obj, tags, commit)
                     self.log_success(f"[REMOTE NAT PEER] Reservada IP {nat_target} (Real: {rem_target})")
                 else:
                     pfx_obj = Prefix(
@@ -358,10 +386,10 @@ class B2BVPNProvisioner(Script):
                         role=b2b_role,
                         status="active",
                         description=desc,
-                        tags=tags,
                     )
                     if commit:
                         pfx_obj.save()
+                    self._assign_tags(pfx_obj, tags, commit)
                     self.log_success(f"[REMOTE NAT PEER] Reservado prefijo {nat_target} (Real: {rem_target})")
                 provisioned_remote.append({"real": rem_target, "nat": nat_target, "mode": "NAT por Contraparte"})
 
@@ -377,10 +405,10 @@ class B2BVPNProvisioner(Script):
                         role=b2b_role,
                         status="active",
                         description=desc,
-                        tags=tags,
                     )
                     if commit:
                         ip_obj.save()
+                    self._assign_tags(ip_obj, tags, commit)
                 else:
                     pfx_obj = Prefix(
                         prefix=dnat_target,
@@ -389,10 +417,10 @@ class B2BVPNProvisioner(Script):
                         role=b2b_role,
                         status="active",
                         description=desc,
-                        tags=tags,
                     )
                     if commit:
                         pfx_obj.save()
+                    self._assign_tags(pfx_obj, tags, commit)
                 self.log_success(f"[LOCAL DNAT] Mapeado DNAT {dnat_target} para {rem_target}")
                 provisioned_remote.append({"real": rem_target, "nat": dnat_target, "mode": "DNAT en Firewall Local"})
 
@@ -431,31 +459,34 @@ class B2BVPNProvisioner(Script):
         comments_payload = "\n".join(markdown_comments)
 
         created_tunnels: List[str] = []
-        for tun_name, hub_label in tunnel_configs:
-            tun_obj = Tunnel(
-                name=tun_name,
-                status="active",
-                encapsulation="ipsec-tunnel",
-                tunnel_group=tunnel_group,
-                tenant=tenant,
-                description=f"VPN B2B {tenant_name} desde {hub_label}",
-                comments=comments_payload,
-                tags=[tunnel_tag],
-            )
-            if commit:
-                tun_obj.save()
+        if Tunnel:
+            for tun_name, hub_label in tunnel_configs:
+                tun_obj = Tunnel(
+                    name=tun_name,
+                    status="active",
+                    encapsulation="ipsec-tunnel",
+                    tunnel_group=tunnel_group,
+                    tenant=tenant,
+                    description=f"VPN B2B {tenant_name} desde {hub_label}",
+                    comments=comments_payload,
+                )
+                if commit:
+                    tun_obj.save()
+                self._assign_tags(tun_obj, [tunnel_tag], commit)
 
-            # Terminación remota asociada a la peer IP
-            term_obj = TunnelTermination(
-                tunnel=tun_obj,
-                role="peer",
-                outside_ip=peer_ip_pri,
-            )
-            if commit:
-                term_obj.save()
+                if TunnelTermination:
+                    try:
+                        term_obj = TunnelTermination(
+                            tunnel=tun_obj,
+                            role="peer",
+                        )
+                        if commit:
+                            term_obj.save()
+                    except Exception as e:
+                        self.log_warning(f"No se pudo registrar TunnelTermination para {tun_name}: {e}")
 
-            self.log_success(f"[TÚNEL CREADO] {tun_name} ({hub_label}) -> Peer: {peer_ip_pri}")
-            created_tunnels.append(tun_name)
+                self.log_success(f"[TÚNEL CREADO] {tun_name} ({hub_label}) -> Peer: {peer_ip_pri}")
+                created_tunnels.append(tun_name)
 
         summary_msg = (
             f"Aprovisionamiento completado con éxito para {tenant_name}. "

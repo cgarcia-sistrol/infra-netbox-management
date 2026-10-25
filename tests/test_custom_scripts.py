@@ -30,7 +30,7 @@ class TestDeviceWizard(unittest.TestCase):
 
     def test_metadata_and_form_fields(self):
         """Verifica que el script expone metadatos y variables correctas para la GUI."""
-        self.assertIn("1. Alta de Dispositivo", DeviceWizard.Meta.name)
+        self.assertIn("[DCIM] Alta de Dispositivo", DeviceWizard.Meta.name)
         self.assertFalse(DeviceWizard.Meta.commit_default)
         self.assertTrue(hasattr(DeviceWizard, "site"))
         self.assertTrue(hasattr(DeviceWizard, "device_role"))
@@ -92,7 +92,7 @@ class TestIPAMQuickAllocate(unittest.TestCase):
 
     def test_metadata_and_form_fields(self):
         """Verifica metadatos y campos de formulario."""
-        self.assertIn("1. Reserva Rápida IPAM", IPAMQuickAllocate.Meta.name)
+        self.assertIn("[IPAM] Reserva Rápida IPAM", IPAMQuickAllocate.Meta.name)
         self.assertTrue(hasattr(IPAMQuickAllocate, "prefix"))
         self.assertTrue(hasattr(IPAMQuickAllocate, "purpose"))
         self.assertTrue(hasattr(IPAMQuickAllocate, "device"))
@@ -135,7 +135,7 @@ class TestDeviceLifecycle(unittest.TestCase):
 
     def test_metadata_and_form_fields(self):
         """Verifica metadatos y campos de formulario."""
-        self.assertIn("2. Ciclo de Vida de Dispositivo", DeviceLifecycle.Meta.name)
+        self.assertIn("[DCIM] Ciclo de Vida de Dispositivo", DeviceLifecycle.Meta.name)
         self.assertTrue(hasattr(DeviceLifecycle, "action"))
         self.assertTrue(hasattr(DeviceLifecycle, "device"))
         self.assertTrue(hasattr(DeviceLifecycle, "new_site"))

@@ -35,7 +35,7 @@ class DeviceLifecycle(Script):
     """Asistente para traslados de sede, bajas operativas y purga de equipos."""
 
     class Meta:
-        name = "2. Ciclo de Vida de Dispositivo (Lifecycle & Decommission)"
+        name = "[DCIM] Ciclo de Vida de Dispositivo (Lifecycle & Decommission)"
         description = (
             "Operaciones seguras de ciclo de vida: Reubicación entre sedes, baja operativa "
             "controlada (decommissioning) o desmantelamiento físico con liberación limpia de IPs y cableado."

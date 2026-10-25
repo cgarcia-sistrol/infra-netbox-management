@@ -41,7 +41,7 @@ class DeviceWizard(Script):
     """Asistente para alta unificada de dispositivos con interfaz e IP."""
 
     class Meta:
-        name = "1. Alta de Dispositivo (Device Wizard)"
+        name = "[DCIM] Alta de Dispositivo (Device Wizard)"
         description = (
             "Aprovisionamiento atómico de dispositivo, interfaz física y reserva/asignación "
             "de la próxima IP libre en una sola operación."
