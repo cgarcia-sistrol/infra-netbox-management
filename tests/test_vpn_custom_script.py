@@ -20,17 +20,31 @@ class TestB2BVPNProvisioner(unittest.TestCase):
         self.assertTrue(hasattr(B2BVPNProvisioner, "tenant_name"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "tunnel_name"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "local_hub"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "adopt_existing"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "peer_ip_primary"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "peer_ip_secondary"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "crypto_profile"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "create_custom_profile"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "custom_profile_name"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "custom_profile_ike_version"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "custom_profile_encryption"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "custom_profile_dh_group"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "tunnel_inside_ip"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "vrf_name"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "tunnel_group_name"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "purpose"))
+        self.assertTrue(hasattr(B2BVPNProvisioner, "traffic_selectors"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "local_prefixes"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "local_nat_enabled"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "local_nat_prefixes"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "remote_prefixes"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "remote_nat_mode"))
         self.assertTrue(hasattr(B2BVPNProvisioner, "remote_nat_targets"))
+
+        # Verificación del hint explicativo en create_custom_profile
+        create_profile_var = getattr(B2BVPNProvisioner, "create_custom_profile")
+        self.assertIn("HINT", create_profile_var.description)
+        self.assertIn("Activar únicamente si el perfil criptográfico no existe previamente en NetBox", create_profile_var.description)
 
     def test_dual_hub_topology_creates_two_tunnels(self):
         """Verifica que la topología Dual-Hub genera 2 túneles en paralelo con sus nombres y tags."""
@@ -182,6 +196,108 @@ class TestB2BVPNProvisioner(unittest.TestCase):
         logs = [log["message"] for log in self.provisioner.logs]
         self.assertTrue(any("DRY-RUN" in m for m in logs))
 
+    def test_crypto_profile_predefined_assignment(self):
+        """Verifica la asignación de perfiles criptográficos estándar existentes (ej. Axpo Custom)."""
+        data = {
+            "tenant_name": "Axpo Iberia",
+            "local_hub": "madrid_cpd",
+            "peer_ip_primary": "195.55.10.20",
+            "crypto_profile": "axpo",
+            "local_prefixes": "10.148.30.0/24",
+            "remote_prefixes": "10.210.0.0/16",
+        }
+        res = self.provisioner.run(data, commit=True)
+        self.assertTrue("ipsec-prof-b2b-axpo-dh19" in res or "Axpo" in res)
+
+    def test_crypto_profile_custom_creation(self):
+        """Verifica la creación bajo demanda de perfil criptográfico desde el formulario con parámetros personalizados."""
+        data = {
+            "tenant_name": "New Partner",
+            "local_hub": "jesp",
+            "peer_ip_primary": "212.128.5.1",
+            "create_custom_profile": True,
+            "custom_profile_name": "Partner-Custom-IKEv2",
+            "custom_profile_ike_version": "2",
+            "custom_profile_encryption": "AES-256-SHA512",
+            "custom_profile_dh_group": "19",
+            "local_prefixes": "10.152.0.0/24",
+            "remote_prefixes": "192.168.200.0/24",
+        }
+        res = self.provisioner.run(data, commit=True)
+        self.assertIn("Partner-Custom-IKEv2", res)
+        logs = [log["message"] for log in self.provisioner.logs]
+        self.assertTrue(any("Partner-Custom-IKEv2" in m for m in logs))
+        self.assertTrue(any("DH: Group 19" in m for m in logs))
+
+    def test_phase2_traffic_selectors_1_to_n(self):
+        """Verifica que el uso de traffic_selectors soporta matrices 1 a N o N a M sin exigir len(local) == len(remote)."""
+        selectors = (
+            "172.20.10.0/24 -> 10.100.5.0/24 [to-Moeve-FV00]\n"
+            "172.20.12.0/24 -> 10.100.5.0/24 [to-Moeve-FV05]\n"
+            "172.20.14.0/24 -> 10.100.5.0/24 [to-Moeve-FV08]\n"
+            "172.20.16.0/24 -> 10.100.5.0/24 [to-Moeve-FV10]"
+        )
+        data = {
+            "tenant_name": "Moeve Renovables",
+            "local_hub": "madrid_cpd",
+            "peer_ip_primary": "80.25.10.5",
+            "traffic_selectors": selectors,
+        }
+        res = self.provisioner.run(data, commit=True)
+        self.assertIn("Moeve Renovables", res)
+        self.assertIn("Selectores procesados: 4", res)
+
+        logs = [log["message"] for log in self.provisioner.logs]
+        self.assertTrue(any("Procesando 4 selectores Phase 2" in m for m in logs))
+
+    def test_fortios_object_alias_and_fqdn_in_traffic_selectors(self):
+        """Verifica el soporte de alias FortiOS y FQDN en selectores Phase 2."""
+        selectors = (
+            "[Aws]*vNet-FV-UCO (172.20.10.0/24) -> [Host]*moeve (10.100.5.10/32) [to-Moeve-FV00]\n"
+            "[Axpo]*Net-01 -> telecontrol.axpo.com [to-Axpo-Main]"
+        )
+        data = {
+            "tenant_name": "FortiOS Test",
+            "local_hub": "madrid_cpd",
+            "peer_ip_primary": "198.51.100.77",
+            "traffic_selectors": selectors,
+        }
+        res = self.provisioner.run(data, commit=True)
+        self.assertIn("FortiOS Test", res)
+        self.assertIn("Selectores procesados: 2", res)
+
+    def test_adopt_existing_tunnel_mode(self):
+        """Verifica que el modo adopción (adopt_existing=True) procesa sin crear sufijos adicionales."""
+        data = {
+            "tenant_name": "Axpo",
+            "tunnel_name": "to-axpo",
+            "local_hub": "madrid_cpd",
+            "peer_ip_primary": "195.55.10.20",
+            "adopt_existing": True,
+            "local_prefixes": "10.148.10.0/24",
+            "remote_prefixes": "10.200.0.0/16",
+        }
+        res = self.provisioner.run(data, commit=True)
+        self.assertIn("to-axpo", res)
+
+    def test_tunnel_interface_and_inside_ip(self):
+        """Verifica la asignación de la Inside IP (/32 o /30) a la interfaz virtual del firewall."""
+        data = {
+            "tenant_name": "Orange B2B",
+            "tunnel_name": "to-orange",
+            "local_hub": "madrid_cpd",
+            "peer_ip_primary": "213.0.100.5",
+            "tunnel_inside_ip": "10.254.13.1/32",
+            "local_prefixes": "10.148.50.0/24",
+            "remote_prefixes": "192.168.10.0/24",
+        }
+        res = self.provisioner.run(data, commit=True)
+        self.assertIn("to-orange", res)
+
+        logs = [log["message"] for log in self.provisioner.logs]
+        self.assertTrue(any("10.254.13.1/32" in m and "INSIDE IP" in m.upper() for m in logs))
+
 
 if __name__ == "__main__":
     unittest.main()
+

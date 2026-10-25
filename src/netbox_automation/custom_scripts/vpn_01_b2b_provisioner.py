@@ -24,12 +24,18 @@ try:
     from ipam.models import Prefix, IPAddress, VRF, Role
     from tenancy.models import Tenant
     from extras.models import Tag
+    from dcim.models import Device, Interface
     try:
-        from vpn.models import Tunnel, TunnelGroup, TunnelTermination
+        from django.contrib.contenttypes.models import ContentType
+    except ImportError:
+        ContentType = None
+    try:
+        from vpn.models import Tunnel, TunnelGroup, TunnelTermination, IPSecProfile
     except ImportError:
         Tunnel = None
         TunnelGroup = None
         TunnelTermination = None
+        IPSecProfile = None
     IS_NETBOX_ENV = True
 except ImportError:
     from netbox_automation.custom_scripts.base import (
@@ -45,9 +51,13 @@ except ImportError:
         Role,
         Tenant,
         Tag,
+        Device,
+        Interface,
         Tunnel,
         TunnelGroup,
         TunnelTermination,
+        IPSecProfile,
+        ContentType,
     )
     IS_NETBOX_ENV = False
 
@@ -65,6 +75,50 @@ def clean_lines(text: Optional[str]) -> List[str]:
         return []
     lines = [line.strip() for line in text.strip().splitlines()]
     return [line for line in lines if line and not line.startswith("#")]
+
+
+def parse_traffic_selectors(lines: List[str]) -> List[Dict[str, str]]:
+    """Parsea líneas de selectores de tráfico Phase 2 en formato:
+
+    'Red_Local -> Red_Remota [Nombre_Selector]' o con alias FortiOS:
+    '[Aws]*vNet-FV-UCO (172.20.10.0/24) -> [Host]*moeve (10.100.5.10/32) [to-Moeve-FV00]'
+    """
+    results: List[Dict[str, str]] = []
+    cidr_pattern = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}\b")
+
+    for line in lines:
+        if not line or line.startswith("#"):
+            continue
+
+        selector_name = ""
+        m_name = re.search(r"\[([^\]]+)\]\s*$", line)
+        cleaned_line = line
+        if m_name:
+            selector_name = m_name.group(1).strip()
+            cleaned_line = line[: m_name.start()].strip()
+
+        if "->" in cleaned_line:
+            parts = cleaned_line.split("->", 1)
+            left = parts[0].strip()
+            right = parts[1].strip()
+        else:
+            left = cleaned_line.strip()
+            right = ""
+
+        local_cidrs = cidr_pattern.findall(left)
+        remote_cidrs = cidr_pattern.findall(right)
+
+        results.append(
+            {
+                "raw": line,
+                "selector_name": selector_name,
+                "local_expr": left,
+                "remote_expr": right,
+                "local_cidr": local_cidrs[0] if local_cidrs else left,
+                "remote_cidr": remote_cidrs[0] if remote_cidrs else right,
+            }
+        )
+    return results
 
 
 class B2BVPNProvisioner(Script):
@@ -86,7 +140,7 @@ class B2BVPNProvisioner(Script):
         label="2. Nombre del Túnel (Opcional)",
         description=(
             "Dejar en blanco para autogenerar 'to-<proveedor>' (o con sufijos -madrid/-jesp si es Dual-Hub "
-            "e incremento secuencial -01, -02... si colisiona). Rellenar solo si se desea un nombre manual."
+            "e incremento secuencial -01, -02... si colisiona sin adopción). Rellenar solo si se desea un nombre manual."
         ),
         required=False,
     )
@@ -103,61 +157,134 @@ class B2BVPNProvisioner(Script):
         required=True,
     )
 
+    adopt_existing = BooleanVar(
+        label="4. Modo Adopción / Idempotente",
+        description="Si el túnel ya existe en NetBox, actualizar sus atributos y comentarios en lugar de duplicar o abortar.",
+        default=True,
+        required=False,
+    )
+
     peer_ip_primary = StringVar(
-        label="4. IP Pública Terminador Remoto (Peer Gateway Principal)",
+        label="5. IP Pública Terminador Remoto (Peer Gateway Principal)",
         description="Dirección IP pública del cortafuegos/router de la contraparte para Fase 1 IPsec.",
         required=True,
     )
 
     peer_ip_secondary = StringVar(
-        label="5. IP Pública Terminador Remoto (Peer Gateway Secundario / Backup)",
+        label="6. IP Pública Terminador Remoto (Peer Gateway Secundario / Backup)",
         description="Opcional. Segunda IP pública del proveedor si dispone de contingencia Dual-Peer.",
         required=False,
     )
 
+    crypto_profile = ChoiceVar(
+        choices=[
+            ("standard", "Standard B2B (IKEv2, AES-256-SHA256, DH 14)"),
+            ("axpo", "Axpo Custom (IKEv2, AES-256-SHA512, DH 19)"),
+            ("legacy", "Legacy B2B (IKEv2, AES-256-SHA512, DH 2)"),
+            ("none", "Sin Perfil / Manual"),
+        ],
+        label="7. Perfil Criptográfico IPsec",
+        description="Seleccionar perfil criptográfico existente en NetBox para vincular al túnel.",
+        default="standard",
+        required=False,
+    )
+
+    create_custom_profile = BooleanVar(
+        label="8. ¿Crear nuevo perfil criptográfico en NetBox?",
+        description=(
+            "💡 [HINT]: Activar únicamente si el perfil criptográfico no existe previamente en NetBox. "
+            "Si no está marcada, se vinculará el perfil existente seleccionado en el desplegable. "
+            "Requiere especificar versión IKE, algoritmos de cifrado/integridad y Grupo DH."
+        ),
+        default=False,
+        required=False,
+    )
+
+    custom_profile_name = StringVar(
+        label="9. Nombre Nuevo Perfil IPsec (Opcional)",
+        description="Nombre del nuevo perfil a crear si la casilla anterior está activa (ej. 'Partner XYZ Custom').",
+        required=False,
+    )
+
+    custom_profile_ike_version = ChoiceVar(
+        choices=[("2", "IKEv2"), ("1", "IKEv1")],
+        label="10. Versión IKE Nuevo Perfil",
+        default="2",
+        required=False,
+    )
+
+    custom_profile_encryption = StringVar(
+        label="11. Algoritmos Cifrado / Hash Nuevo Perfil",
+        description="Algoritmos de cifrado y hash (ej. 'AES-256-SHA256').",
+        default="AES-256-SHA256",
+        required=False,
+    )
+
+    custom_profile_dh_group = StringVar(
+        label="12. Grupo Diffie-Hellman Nuevo Perfil",
+        description="Grupo DH (ej. '14', '19', '2').",
+        default="14",
+        required=False,
+    )
+
+    tunnel_inside_ip = StringVar(
+        label="13. IP de Transferencia del Túnel (Inside IP)",
+        description="Dirección IP /30 o /32 asignada a la interfaz virtual del túnel en NetBox (ej. 10.254.13.1/32).",
+        required=False,
+    )
+
     vrf_name = StringVar(
-        label="6. VRF Destino IPAM",
+        label="14. VRF Destino IPAM",
         description="VRF en la que se registrarán las redes y traducciones NAT.",
         default="VRF-B2B-EXT",
         required=True,
     )
 
     tunnel_group_name = StringVar(
-        label="7. Grupo de Túneles",
+        label="15. Grupo de Túneles",
         description="Contenedor lógico para agrupar túneles en NetBox.",
         default="VPNs-B2B-Extranet",
         required=True,
     )
 
     purpose = StringVar(
-        label="8. Propósito del Servicio",
+        label="16. Propósito del Servicio",
         description="Descripción técnica del túnel (ej. Interconexión SCADA / Telecontrol Plantas FV).",
         required=False,
     )
 
+    traffic_selectors = TextVar(
+        label="17. Selectores Phase 2 Flexibles (1 a N / N a M)",
+        description=(
+            "Formato opcional avanzado por línea: 'Red_Local -> Red_Remota [Nombre_Selector]' o con alias FortiOS "
+            "'172.20.10.0/24 -> 10.100.5.0/24 [to-Moeve-FV00]'. Si se especifica, anula la exigencia de cardinalidad 1:1."
+        ),
+        required=False,
+    )
+
     local_prefixes = TextVar(
-        label="9. Redes Locales Reales (Una por línea)",
+        label="18. Redes Locales Reales (Una por línea)",
         description="Prefijos CIDR locales anunciados hacia el túnel (ej. 172.20.10.0/24, 10.148.10.0/24).",
-        required=True,
+        required=False,
     )
 
     local_nat_enabled = BooleanVar(
-        label="10. ¿Aplicar NAT a las Redes Locales (SNAT / 1:1)?",
+        label="19. ¿Aplicar NAT a las Redes Locales (SNAT / 1:1)?",
         description="Marcar si las redes locales se solapan con el proveedor y deben traducirse antes de salir al túnel.",
         default=False,
         required=False,
     )
 
     local_nat_prefixes = TextVar(
-        label="11. Redes Locales Traducidas (NAT) (Una por línea)",
+        label="20. Redes Locales Traducidas (NAT) (Una por línea)",
         description="Prefijos CIDR resultantes en la VRF (ej. 100.97.10.0/24). Requerido si la casilla anterior está marcada.",
         required=False,
     )
 
     remote_prefixes = TextVar(
-        label="12. Redes / IPs Remotas del Proveedor (Una por línea)",
+        label="21. Redes / IPs Remotas del Proveedor (Una por línea)",
         description="Prefijos o direcciones IP que el proveedor publica hacia nosotros a través del túnel.",
-        required=True,
+        required=False,
     )
 
     remote_nat_mode = ChoiceVar(
@@ -166,14 +293,14 @@ class B2BVPNProvisioner(Script):
             ("peer_nat", "NAT en Origen por Contraparte (Asignamos IP/Rango de nuestro pool)"),
             ("local_dnat", "DNAT Local en Firewall (Nosotros traducimos el tráfico del proveedor)"),
         ],
-        label="13. Modo NAT Remoto",
+        label="22. Modo NAT Remoto",
         description="Estrategia de traducción para el tráfico entrante de la contraparte.",
         default="none",
         required=True,
     )
 
     remote_nat_targets = TextVar(
-        label="14. IPs o Redes Remotas Traducidas (NAT) (Una por línea)",
+        label="23. IPs o Redes Remotas Traducidas (NAT) (Una por línea)",
         description="IPs o prefijos traducidos resultantes (ej. 100.98.200.1/32). Requerido si el modo NAT no es 'none'.",
         required=False,
     )
@@ -266,6 +393,99 @@ class B2BVPNProvisioner(Script):
         else:
             return [(base, "HUB 00 (Madrid CPD)")]
 
+    def _resolve_ipsec_profile(self, data: Dict[str, Any], slug_tenant: str, commit: bool) -> Optional[Any]:
+        """Resuelve o crea el perfil criptográfico IPsec según las opciones del formulario."""
+        if not IPSecProfile:
+            return None
+
+        create_custom = data.get("create_custom_profile", False)
+        if create_custom:
+            name = (data.get("custom_profile_name") or f"Profile-{slug_tenant}").strip()
+            ike_ver = int(data.get("custom_profile_ike_version", 2))
+            enc = data.get("custom_profile_encryption", "AES-256-SHA256").strip()
+            dh = data.get("custom_profile_dh_group", "14").strip()
+            desc = f"IKEv{ike_ver} | Enc: {enc} | DH: Group {dh}"
+            if IS_NETBOX_ENV:
+                profile, created = IPSecProfile.objects.get_or_create(
+                    name=name,
+                    defaults={"description": desc, "mode": "esp", "ike_version": ike_ver},
+                )
+                if created and commit:
+                    self.log_success(f"[IPSEC PROFILE CREADO] {name} ({desc})")
+                return profile
+            else:
+                if commit:
+                    self.log_success(f"[IPSEC PROFILE CREADO] {name} ({desc})")
+                return IPSecProfile(name=name, description=desc, mode="esp", ike_version=ike_ver)
+        else:
+            choice = data.get("crypto_profile", "standard")
+            if choice == "none":
+                return None
+            profile_candidates_map = {
+                "standard": ["ipsec-prof-b2b-standard-dh14", "Standard B2B"],
+                "axpo": ["ipsec-prof-b2b-axpo-dh19", "Axpo Custom"],
+                "legacy": ["ipsec-prof-b2b-legacy-dh2", "Legacy B2B"],
+            }
+            candidates = profile_candidates_map.get(choice, [choice])
+            if IS_NETBOX_ENV:
+                profile = None
+                for cand in candidates:
+                    profile = IPSecProfile.objects.filter(name=cand).first()
+                    if profile:
+                        break
+                if not profile and hasattr(IPSecProfile.objects, "filter"):
+                    try:
+                        profile = IPSecProfile.objects.filter(name__icontains=choice).first()
+                    except Exception:
+                        profile = None
+
+                if profile:
+                    self.log_info(f"[IPSEC PROFILE VINCULADO] {profile.name}")
+                    return profile
+                else:
+                    self.log_warning(f"Perfil IPsec para '{choice}' no encontrado en NetBox ({candidates}). Se omite vinculación.")
+                    return None
+            else:
+                return IPSecProfile(name=candidates[0])
+
+    def _resolve_firewall_interface(self, hub_label: str, tun_name: str, commit: bool) -> Tuple[Optional[Any], Optional[Any]]:
+        """Resuelve el firewall correspondiente al HUB y crea/obtiene la interfaz virtual IPsec."""
+        device_name = "FortiGate-100F" if "Madrid" in hub_label else "FGT100-JES"
+
+        if IS_NETBOX_ENV:
+            device = None
+            if Device:
+                device = Device.objects.filter(name=device_name).first()
+            iface = None
+            if Interface and device:
+                iface = Interface.objects.filter(device=device, name=tun_name).first()
+                if not iface:
+                    iface = Interface(
+                        device=device,
+                        name=tun_name,
+                        type="virtual",
+                        description=f"IPsec Virtual Interface para {tun_name}",
+                        enabled=True,
+                    )
+                    if commit:
+                        iface.save()
+                        self.log_success(f"[INTERFAZ VIRTUAL CREADA] {device_name} -> {tun_name}")
+            return device, iface
+        else:
+            dev = Device(name=device_name) if Device else None
+            iface = (
+                Interface(
+                    device=dev,
+                    name=tun_name,
+                    type="virtual",
+                    description=f"IPsec Virtual Interface para {tun_name}",
+                    enabled=True,
+                )
+                if Interface
+                else None
+            )
+            return dev, iface
+
     # ------------------------------------------------------------------
     # Ejecución Principal
     # ------------------------------------------------------------------
@@ -273,11 +493,17 @@ class B2BVPNProvisioner(Script):
         tenant_name = data["tenant_name"].strip()
         manual_tunnel_name = data.get("tunnel_name")
         topology = data.get("local_hub", "madrid_cpd")
+        adopt_existing = data.get("adopt_existing", True)
         peer_ip_pri = data["peer_ip_primary"].strip()
         peer_ip_sec = (data.get("peer_ip_secondary") or "").strip()
         vrf_name = data.get("vrf_name", "VRF-B2B-EXT").strip()
         tunnel_group_name = data.get("tunnel_group_name", "VPNs-B2B-Extranet").strip()
         purpose_desc = (data.get("purpose") or data.get("description") or "").strip()
+        tunnel_inside_ip = (data.get("tunnel_inside_ip") or "").strip()
+
+        # Parseo de Selectores Phase 2 avanzados
+        raw_traffic_selectors = clean_lines(data.get("traffic_selectors"))
+        parsed_selectors = parse_traffic_selectors(raw_traffic_selectors)
 
         local_prefixes = clean_lines(data.get("local_prefixes"))
         local_nat_enabled = data.get("local_nat_enabled", False)
@@ -288,24 +514,27 @@ class B2BVPNProvisioner(Script):
         remote_nat_targets = clean_lines(data.get("remote_nat_targets"))
 
         # Validaciones de cardinalidad y coherencia
-        if not local_prefixes:
-            raise AbortScript("Debe especificar al menos un prefijo local real.")
-        if not remote_prefixes:
-            raise AbortScript("Debe especificar al menos una red o IP remota del proveedor.")
+        if not parsed_selectors:
+            if not local_prefixes:
+                raise AbortScript("Debe especificar al menos un prefijo local real.")
+            if not remote_prefixes:
+                raise AbortScript("Debe especificar al menos una red o IP remota del proveedor.")
 
-        if local_nat_enabled:
-            if len(local_prefixes) != len(local_nat_prefixes):
-                raise AbortScript(
-                    f"Desajuste en Lado Local: {len(local_prefixes)} redes locales reales especificadas "
-                    f"pero {len(local_nat_prefixes)} redes NAT introducidas. Deben tener correspondencia 1:1."
-                )
+            if local_nat_enabled:
+                if len(local_prefixes) != len(local_nat_prefixes):
+                    raise AbortScript(
+                        f"Desajuste en Lado Local: {len(local_prefixes)} redes locales reales especificadas "
+                        f"pero {len(local_nat_prefixes)} redes NAT introducidas. Deben tener correspondencia 1:1."
+                    )
 
-        if remote_nat_mode in ("peer_nat", "local_dnat"):
-            if len(remote_prefixes) != len(remote_nat_targets):
-                raise AbortScript(
-                    f"Desajuste en Lado Remoto: {len(remote_prefixes)} redes remotas especificadas "
-                    f"pero {len(remote_nat_targets)} objetivos NAT introducidos. Deben tener correspondencia 1:1."
-                )
+            if remote_nat_mode in ("peer_nat", "local_dnat"):
+                if len(remote_prefixes) != len(remote_nat_targets):
+                    raise AbortScript(
+                        f"Desajuste en Lado Remoto: {len(remote_prefixes)} redes remotas especificadas "
+                        f"pero {len(remote_nat_targets)} objetivos NAT introducidos. Deben tener correspondencia 1:1."
+                    )
+        else:
+            self.log_info(f"Procesando {len(parsed_selectors)} selectores Phase 2 avanzados.")
 
         if not commit:
             self.log_warning("[DRY-RUN] Ejecutando en modo simulación. No se persistirán cambios en la base de datos.")
@@ -428,10 +657,44 @@ class B2BVPNProvisioner(Script):
                 self.log_info(f"[REMOTE DIRECT] Red remota sin NAT: {rem_target}")
                 provisioned_remote.append({"real": rem_target, "nat": "N/A (Directo)", "mode": "Ruta Directa"})
 
-        # 5. Modelado de Túnel(es) VPN y Terminaciones
+        # Registrar prefijos de Phase 2 en IPAM si se especifican con formato CIDR
+        cidr_pattern = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$")
+        for sel in parsed_selectors:
+            loc_c = sel["local_cidr"]
+            rem_c = sel["remote_cidr"]
+            name_sel = sel["selector_name"] or "Phase 2"
+            if cidr_pattern.match(loc_c):
+                pfx_obj = Prefix(
+                    prefix=loc_c,
+                    vrf=vrf,
+                    tenant=tenant,
+                    role=b2b_role,
+                    status="active",
+                    description=f"Phase 2 Local [{name_sel}] | {sel['local_expr']}",
+                )
+                if commit:
+                    pfx_obj.save()
+                self._assign_tags(pfx_obj, [tunnel_tag], commit)
+            if cidr_pattern.match(rem_c):
+                pfx_obj = Prefix(
+                    prefix=rem_c,
+                    vrf=vrf,
+                    tenant=tenant,
+                    role=b2b_role,
+                    status="active",
+                    description=f"Phase 2 Remoto [{name_sel}] | {sel['remote_expr']}",
+                )
+                if commit:
+                    pfx_obj.save()
+                self._assign_tags(pfx_obj, [tunnel_tag, b2b_remote_tag], commit)
+
+        # 5. Modelado de Perfil Criptográfico
+        ipsec_profile = self._resolve_ipsec_profile(data, slug_tenant, commit)
+
+        # 6. Modelado de Túnel(es) VPN y Terminaciones
         tunnel_configs = self._resolve_tunnel_names(manual_tunnel_name, tenant_name, topology)
 
-        # Preparar tabla Markdown para comentarios del túnel
+        # Preparar comentarios Markdown estructurados
         markdown_comments = [
             f"## Interconexión VPN B2B: {tenant_name}",
             f"- **Propósito**: {purpose_desc or 'Conectividad B2B Site-to-Site'}",
@@ -439,61 +702,145 @@ class B2BVPNProvisioner(Script):
             f"- **Peer Gateway Secundario**: `{peer_ip_sec or 'N/A'}`",
             f"- **VRF**: `{vrf_name}`",
             f"- **Tag Global**: `{tunnel_tag_name}`",
-            "",
-            "### Matriz de Tráfico y NAT Local",
-            "| Red Real Local | Red Publicada (NAT) | Tipo de Enrutamiento |",
-            "| :--- | :--- | :--- |",
+            f"- **Perfil IPsec**: `{getattr(ipsec_profile, 'name', 'N/A')}`",
         ]
-        for item in provisioned_local:
-            markdown_comments.append(f"| `{item['real']}` | `{item['nat']}` | {item['mode']} |")
+        if tunnel_inside_ip:
+            markdown_comments.append(f"- **Inside IP / Transferencia**: `{tunnel_inside_ip}`")
 
-        markdown_comments.extend([
-            "",
-            "### Matriz de Tráfico y NAT Remoto",
-            "| Red/IP Real Remota | Red/IP en Edison (NAT) | Tipo de Enrutamiento |",
-            "| :--- | :--- | :--- |",
-        ])
-        for item in provisioned_remote:
-            markdown_comments.append(f"| `{item['real']}` | `{item['nat']}` | {item['mode']} |")
+        if parsed_selectors:
+            markdown_comments.extend([
+                "",
+                "### Selectores Phase 2 (Matriz de Tráfico)",
+                "| Selector / Nombre | Red Local / Alias | Red Remota / Alias |",
+                "| :--- | :--- | :--- |",
+            ])
+            for s in parsed_selectors:
+                s_name = s["selector_name"] or "P2"
+                markdown_comments.append(f"| `{s_name}` | `{s['local_expr']}` | `{s['remote_expr']}` |")
+
+        if provisioned_local:
+            markdown_comments.extend([
+                "",
+                "### Matriz de Tráfico y NAT Local",
+                "| Red Real Local | Red Publicada (NAT) | Tipo de Enrutamiento |",
+                "| :--- | :--- | :--- |",
+            ])
+            for item in provisioned_local:
+                markdown_comments.append(f"| `{item['real']}` | `{item['nat']}` | {item['mode']} |")
+
+        if provisioned_remote:
+            markdown_comments.extend([
+                "",
+                "### Matriz de Tráfico y NAT Remoto",
+                "| Red/IP Real Remota | Red/IP en Edison (NAT) | Tipo de Enrutamiento |",
+                "| :--- | :--- | :--- |",
+            ])
+            for item in provisioned_remote:
+                markdown_comments.append(f"| `{item['real']}` | `{item['nat']}` | {item['mode']} |")
 
         comments_payload = "\n".join(markdown_comments)
 
         created_tunnels: List[str] = []
         if Tunnel:
             for tun_name, hub_label in tunnel_configs:
-                tun_obj = Tunnel(
-                    name=tun_name,
-                    status="active",
-                    encapsulation="ipsec-tunnel",
-                    tunnel_group=tunnel_group,
-                    tenant=tenant,
-                    description=f"VPN B2B {tenant_name} desde {hub_label}",
-                    comments=comments_payload,
-                )
-                if commit:
-                    tun_obj.save()
-                self._assign_tags(tun_obj, [tunnel_tag], commit)
+                # Resolver interfaz virtual en el firewall del HUB
+                dev_obj, iface_obj = self._resolve_firewall_interface(hub_label, tun_name, commit)
 
+                # Registrar Inside IP si se especifica
+                if tunnel_inside_ip and iface_obj:
+                    inside_ip_obj = IPAddress(
+                        address=tunnel_inside_ip,
+                        vrf=vrf,
+                        tenant=tenant,
+                        role=b2b_role,
+                        status="active",
+                        description=f"Inside IP túnel {tun_name}",
+                        assigned_object=iface_obj,
+                    )
+                    if commit:
+                        inside_ip_obj.save()
+                    self._assign_tags(inside_ip_obj, [tunnel_tag], commit)
+                    self.log_success(
+                        f"[INSIDE IP] Asignada IP {tunnel_inside_ip} a interfaz {tun_name} ({getattr(dev_obj, 'name', '')})"
+                    )
+
+                # Modo Adopción o Creación Idempotente
+                tun_obj = None
+                if adopt_existing:
+                    if IS_NETBOX_ENV:
+                        tun_obj = Tunnel.objects.filter(name=tun_name).first()
+                    # Si ya existe en NetBox, actualizar
+                    if tun_obj:
+                        tun_obj.status = "active"
+                        tun_obj.encapsulation = "ipsec-tunnel"
+                        tun_obj.tunnel_group = tunnel_group
+                        tun_obj.tenant = tenant
+                        tun_obj.ipsec_profile = ipsec_profile
+                        tun_obj.description = f"VPN B2B {tenant_name} desde {hub_label}"
+                        tun_obj.comments = comments_payload
+                        if commit:
+                            tun_obj.save()
+                        self.log_info(f"[ADOPTADO] Túnel existente actualizado sin duplicar: {tun_name}")
+
+                if not tun_obj:
+                    tun_obj = Tunnel(
+                        name=tun_name,
+                        status="active",
+                        encapsulation="ipsec-tunnel",
+                        tunnel_group=tunnel_group,
+                        tenant=tenant,
+                        ipsec_profile=ipsec_profile,
+                        description=f"VPN B2B {tenant_name} desde {hub_label}",
+                        comments=comments_payload,
+                    )
+                    if commit:
+                        tun_obj.save()
+                    self.log_success(f"[TÚNEL CREADO] {tun_name} ({hub_label}) -> Peer: {peer_ip_pri}")
+
+                self._assign_tags(tun_obj, [tunnel_tag], commit)
+                created_tunnels.append(tun_name)
+
+                # Registrar terminaciones (Local vinculada a dcim.interface y Remota con outside_ip)
                 if TunnelTermination:
+                    # Terminación local
                     try:
-                        term_obj = TunnelTermination(
+                        ct_iface = None
+                        if ContentType:
+                            if IS_NETBOX_ENV:
+                                ct_iface = ContentType.objects.get(app_label="dcim", model="interface")
+                            else:
+                                ct_iface = ContentType.objects.get("dcim", "interface")
+
+                        term_local = TunnelTermination(
                             tunnel=tun_obj,
-                            role="peer",
+                            role="hub" if topology == "dual_hub" else "peer",
+                            termination_type=ct_iface or "dcim.interface",
+                            termination_id=getattr(iface_obj, "id", 1) if iface_obj else None,
+                            termination=iface_obj,
                         )
                         if commit:
-                            term_obj.save()
+                            term_local.save()
                     except Exception as e:
-                        self.log_warning(f"No se pudo registrar TunnelTermination para {tun_name}: {e}")
+                        self.log_warning(f"No se pudo registrar TunnelTermination local para {tun_name}: {e}")
 
-                self.log_success(f"[TÚNEL CREADO] {tun_name} ({hub_label}) -> Peer: {peer_ip_pri}")
-                created_tunnels.append(tun_name)
+                    # Terminación remota
+                    try:
+                        term_remote = TunnelTermination(
+                            tunnel=tun_obj,
+                            role="peer",
+                            outside_ip=peer_ip_pri,
+                        )
+                        if commit:
+                            term_remote.save()
+                    except Exception as e:
+                        self.log_warning(f"No se pudo registrar TunnelTermination remota para {tun_name}: {e}")
 
         summary_msg = (
             f"Aprovisionamiento completado con éxito para {tenant_name}. "
             f"Túneles gestionados: {', '.join(created_tunnels)}. "
             f"Tag dinámico asignado: {tunnel_tag_name}. "
-            f"Redes locales procesadas: {len(local_prefixes)}. "
-            f"Redes remotas procesadas: {len(remote_prefixes)}."
+            f"Perfil IPsec: {getattr(ipsec_profile, 'name', 'N/A')}. "
+            f"Selectores procesados: {len(parsed_selectors) if parsed_selectors else len(local_prefixes)}."
         )
         self.log_info(summary_msg)
         return summary_msg

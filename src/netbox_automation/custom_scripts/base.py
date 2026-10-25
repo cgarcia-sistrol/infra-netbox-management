@@ -25,11 +25,16 @@ try:
     from tenancy.models import Tenant  # type: ignore
     from extras.models import Tag  # type: ignore
     try:
-        from vpn.models import Tunnel, TunnelGroup, TunnelTermination  # type: ignore
+        from vpn.models import Tunnel, TunnelGroup, TunnelTermination, IPSecProfile  # type: ignore
     except ImportError:
         Tunnel = None  # type: ignore
         TunnelGroup = None  # type: ignore
         TunnelTermination = None  # type: ignore
+        IPSecProfile = None  # type: ignore
+    try:
+        from django.contrib.contenttypes.models import ContentType  # type: ignore
+    except ImportError:
+        ContentType = None  # type: ignore
     from utilities.exceptions import AbortScript  # type: ignore
     IS_NETBOX_ENV = True
 
@@ -255,6 +260,24 @@ except ImportError:
         termination_b: Any = None
         status: str = "connected"
 
+    class IPSecProfile(MockModelBase):  # type: ignore
+        name: str = "Standard B2B"
+        mode: str = "esp"
+        ike_version: int = 2
+        description: str = ""
+
+    class ContentType:  # type: ignore
+        def __init__(self, app_label: str = "", model: str = ""):
+            self.app_label = app_label
+            self.model = model
+
+        class _Objects:
+            @staticmethod
+            def get(app_label: str, model: str):
+                return ContentType(app_label, model)
+
+        objects = _Objects()
+
     class TunnelGroup(MockModelBase):  # type: ignore
         name: str = "VPNs-B2B-Extranet"
         slug: str = "vpns-b2b-extranet"
@@ -266,14 +289,16 @@ except ImportError:
         encapsulation: str = "ipsec-tunnel"
         tunnel_group: Any = None
         tenant: Any = None
+        ipsec_profile: Any = None
         description: str = ""
         comments: str = ""
 
     class TunnelTermination(MockModelBase):  # type: ignore
         tunnel: Any = None
         role: str = "peer"
-        termination_type: str = "dcim.interface"
+        termination_type: Any = "dcim.interface"
         termination_id: Optional[int] = None
+        termination: Any = None
         outside_ip: Any = None
 
     class Script:  # type: ignore
