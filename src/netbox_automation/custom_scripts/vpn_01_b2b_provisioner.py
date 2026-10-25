@@ -371,6 +371,76 @@ class B2BVPNProvisioner(Script):
                 return None
         return Role(name="B2B Extranet / NAT", slug="b2b-extranet-nat")
 
+    def _get_or_create_prefix(
+        self,
+        prefix_str: str,
+        vrf: Optional[Any],
+        tenant: Optional[Any],
+        role: Optional[Any],
+        description: str,
+        commit: bool,
+    ) -> Any:
+        """Obtiene un prefijo existente en la VRF o crea uno nuevo de forma idempotente."""
+        if IS_NETBOX_ENV:
+            pfx = Prefix.objects.filter(prefix=prefix_str, vrf=vrf).first()
+            if pfx:
+                return pfx
+            pfx = Prefix(
+                prefix=prefix_str,
+                vrf=vrf,
+                tenant=tenant,
+                role=role,
+                status="active",
+                description=description,
+            )
+            if commit:
+                pfx.save()
+            return pfx
+        else:
+            return Prefix(
+                prefix=prefix_str,
+                vrf=vrf,
+                tenant=tenant,
+                role=role,
+                status="active",
+                description=description,
+            )
+
+    def _get_or_create_ip_address(
+        self,
+        address_str: str,
+        vrf: Optional[Any],
+        tenant: Optional[Any],
+        role: Optional[Any],
+        description: str,
+        commit: bool,
+    ) -> Any:
+        """Obtiene una dirección IP existente en la VRF o crea una nueva de forma idempotente."""
+        if IS_NETBOX_ENV:
+            ip = IPAddress.objects.filter(address=address_str, vrf=vrf).first()
+            if ip:
+                return ip
+            ip = IPAddress(
+                address=address_str,
+                vrf=vrf,
+                tenant=tenant,
+                role=role,
+                status="active",
+                description=description,
+            )
+            if commit:
+                ip.save()
+            return ip
+        else:
+            return IPAddress(
+                address=address_str,
+                vrf=vrf,
+                tenant=tenant,
+                role=role,
+                status="active",
+                description=description,
+            )
+
     def _resolve_tunnel_names(
         self,
         manual_name: Optional[str],
@@ -564,30 +634,42 @@ class B2BVPNProvisioner(Script):
         b2b_role = self._get_b2b_role()
 
         # 3. Procesamiento Lado Local
+        assigned_local_prefixes: List[Any] = []
         provisioned_local: List[Dict[str, str]] = []
         for idx, real_pfx in enumerate(local_prefixes):
             if local_nat_enabled:
                 nat_pfx = local_nat_prefixes[idx]
                 desc = f"NAT 1:1 {tenant_name} | Real: {real_pfx}"
                 tags = [tunnel_tag, b2b_nat_tag]
-                pfx_obj = Prefix(
-                    prefix=nat_pfx,
+                pfx_obj = self._get_or_create_prefix(
+                    prefix_str=nat_pfx,
                     vrf=vrf,
                     tenant=tenant,
                     role=b2b_role,
-                    status="active",
                     description=desc,
+                    commit=commit,
                 )
-                if commit:
-                    pfx_obj.save()
                 self._assign_tags(pfx_obj, tags, commit)
                 self.log_success(f"[LOCAL NAT] Asignado prefijo {nat_pfx} (Real: {real_pfx})")
                 provisioned_local.append({"real": real_pfx, "nat": nat_pfx, "mode": "SNAT 1:1"})
+                assigned_local_prefixes.append(pfx_obj)
             else:
                 self.log_info(f"[LOCAL DIRECT] Prefijo real sin NAT asociado al túnel: {real_pfx}")
                 provisioned_local.append({"real": real_pfx, "nat": "N/A (Directo)", "mode": "Ruta Directa"})
+                if "/" in real_pfx:
+                    pfx_obj = self._get_or_create_prefix(
+                        prefix_str=real_pfx,
+                        vrf=vrf,
+                        tenant=tenant,
+                        role=b2b_role,
+                        description=f"Red Local Directa {tenant_name}",
+                        commit=commit,
+                    )
+                    self._assign_tags(pfx_obj, [tunnel_tag], commit)
+                    assigned_local_prefixes.append(pfx_obj)
 
         # 4. Procesamiento Lado Remoto
+        assigned_remote_prefixes: List[Any] = []
         provisioned_remote: List[Dict[str, str]] = []
         for idx, rem_target in enumerate(remote_prefixes):
             if remote_nat_mode == "peer_nat":
@@ -595,31 +677,28 @@ class B2BVPNProvisioner(Script):
                 desc = f"Host/Red NAT Remoto {tenant_name} | IP Real Proveedor: {rem_target}"
                 tags = [tunnel_tag, b2b_remote_tag]
                 if "/" in nat_target and nat_target.endswith("/32"):
-                    ip_obj = IPAddress(
-                        address=nat_target,
+                    ip_obj = self._get_or_create_ip_address(
+                        address_str=nat_target,
                         vrf=vrf,
                         tenant=tenant,
                         role=b2b_role,
-                        status="active",
                         description=desc,
+                        commit=commit,
                     )
-                    if commit:
-                        ip_obj.save()
                     self._assign_tags(ip_obj, tags, commit)
                     self.log_success(f"[REMOTE NAT PEER] Reservada IP {nat_target} (Real: {rem_target})")
                 else:
-                    pfx_obj = Prefix(
-                        prefix=nat_target,
+                    pfx_obj = self._get_or_create_prefix(
+                        prefix_str=nat_target,
                         vrf=vrf,
                         tenant=tenant,
                         role=b2b_role,
-                        status="active",
                         description=desc,
+                        commit=commit,
                     )
-                    if commit:
-                        pfx_obj.save()
                     self._assign_tags(pfx_obj, tags, commit)
                     self.log_success(f"[REMOTE NAT PEER] Reservado prefijo {nat_target} (Real: {rem_target})")
+                    assigned_remote_prefixes.append(pfx_obj)
                 provisioned_remote.append({"real": rem_target, "nat": nat_target, "mode": "NAT por Contraparte"})
 
             elif remote_nat_mode == "local_dnat":
@@ -627,35 +706,43 @@ class B2BVPNProvisioner(Script):
                 desc = f"DNAT Local para {tenant_name} | Remoto Original: {rem_target}"
                 tags = [tunnel_tag, overlap_tag]
                 if "/" in dnat_target and dnat_target.endswith("/32"):
-                    ip_obj = IPAddress(
-                        address=dnat_target,
+                    ip_obj = self._get_or_create_ip_address(
+                        address_str=dnat_target,
                         vrf=vrf,
                         tenant=tenant,
                         role=b2b_role,
-                        status="active",
                         description=desc,
+                        commit=commit,
                     )
-                    if commit:
-                        ip_obj.save()
                     self._assign_tags(ip_obj, tags, commit)
                 else:
-                    pfx_obj = Prefix(
-                        prefix=dnat_target,
+                    pfx_obj = self._get_or_create_prefix(
+                        prefix_str=dnat_target,
                         vrf=vrf,
                         tenant=tenant,
                         role=b2b_role,
-                        status="active",
                         description=desc,
+                        commit=commit,
                     )
-                    if commit:
-                        pfx_obj.save()
                     self._assign_tags(pfx_obj, tags, commit)
+                    assigned_remote_prefixes.append(pfx_obj)
                 self.log_success(f"[LOCAL DNAT] Mapeado DNAT {dnat_target} para {rem_target}")
                 provisioned_remote.append({"real": rem_target, "nat": dnat_target, "mode": "DNAT en Firewall Local"})
 
             else:
                 self.log_info(f"[REMOTE DIRECT] Red remota sin NAT: {rem_target}")
                 provisioned_remote.append({"real": rem_target, "nat": "N/A (Directo)", "mode": "Ruta Directa"})
+                if "/" in rem_target:
+                    pfx_obj = self._get_or_create_prefix(
+                        prefix_str=rem_target,
+                        vrf=vrf,
+                        tenant=tenant,
+                        role=b2b_role,
+                        description=f"Red Remota Directa {tenant_name}",
+                        commit=commit,
+                    )
+                    self._assign_tags(pfx_obj, [tunnel_tag, b2b_remote_tag], commit)
+                    assigned_remote_prefixes.append(pfx_obj)
 
         # Registrar prefijos de Phase 2 en IPAM si se especifican con formato CIDR
         cidr_pattern = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$")
@@ -664,29 +751,27 @@ class B2BVPNProvisioner(Script):
             rem_c = sel["remote_cidr"]
             name_sel = sel["selector_name"] or "Phase 2"
             if cidr_pattern.match(loc_c):
-                pfx_obj = Prefix(
-                    prefix=loc_c,
+                pfx_obj = self._get_or_create_prefix(
+                    prefix_str=loc_c,
                     vrf=vrf,
                     tenant=tenant,
                     role=b2b_role,
-                    status="active",
                     description=f"Phase 2 Local [{name_sel}] | {sel['local_expr']}",
+                    commit=commit,
                 )
-                if commit:
-                    pfx_obj.save()
                 self._assign_tags(pfx_obj, [tunnel_tag], commit)
+                assigned_local_prefixes.append(pfx_obj)
             if cidr_pattern.match(rem_c):
-                pfx_obj = Prefix(
-                    prefix=rem_c,
+                pfx_obj = self._get_or_create_prefix(
+                    prefix_str=rem_c,
                     vrf=vrf,
                     tenant=tenant,
                     role=b2b_role,
-                    status="active",
                     description=f"Phase 2 Remoto [{name_sel}] | {sel['remote_expr']}",
+                    commit=commit,
                 )
-                if commit:
-                    pfx_obj.save()
                 self._assign_tags(pfx_obj, [tunnel_tag, b2b_remote_tag], commit)
+                assigned_remote_prefixes.append(pfx_obj)
 
         # 5. Modelado de Perfil Criptográfico
         ipsec_profile = self._resolve_ipsec_profile(data, slug_tenant, commit)
@@ -764,6 +849,13 @@ class B2BVPNProvisioner(Script):
                         f"[INSIDE IP] Asignada IP {tunnel_inside_ip} a interfaz {tun_name} ({getattr(dev_obj, 'name', '')})"
                     )
 
+                # Extraer PKs de los prefijos asignados para Custom Fields multiobject
+                local_pks = [getattr(p, "pk", getattr(p, "id", None)) for p in assigned_local_prefixes]
+                local_pks = [pk for pk in dict.fromkeys(local_pks) if pk is not None]
+
+                remote_pks = [getattr(p, "pk", getattr(p, "id", None)) for p in assigned_remote_prefixes]
+                remote_pks = [pk for pk in dict.fromkeys(remote_pks) if pk is not None]
+
                 # Modo Adopción o Creación Idempotente
                 tun_obj = None
                 if adopt_existing:
@@ -778,6 +870,10 @@ class B2BVPNProvisioner(Script):
                         tun_obj.ipsec_profile = ipsec_profile
                         tun_obj.description = f"VPN B2B {tenant_name} desde {hub_label}"
                         tun_obj.comments = comments_payload
+                        if not hasattr(tun_obj, "custom_field_data") or tun_obj.custom_field_data is None:
+                            tun_obj.custom_field_data = {}
+                        tun_obj.custom_field_data["local_prefixes"] = local_pks
+                        tun_obj.custom_field_data["remote_prefixes"] = remote_pks
                         if commit:
                             tun_obj.save()
                         self.log_info(f"[ADOPTADO] Túnel existente actualizado sin duplicar: {tun_name}")
@@ -792,7 +888,15 @@ class B2BVPNProvisioner(Script):
                         ipsec_profile=ipsec_profile,
                         description=f"VPN B2B {tenant_name} desde {hub_label}",
                         comments=comments_payload,
+                        custom_field_data={
+                            "local_prefixes": local_pks,
+                            "remote_prefixes": remote_pks,
+                        },
                     )
+                    if not hasattr(tun_obj, "custom_field_data") or tun_obj.custom_field_data is None:
+                        tun_obj.custom_field_data = {}
+                    tun_obj.custom_field_data["local_prefixes"] = local_pks
+                    tun_obj.custom_field_data["remote_prefixes"] = remote_pks
                     if commit:
                         tun_obj.save()
                     self.log_success(f"[TÚNEL CREADO] {tun_name} ({hub_label}) -> Peer: {peer_ip_pri}")

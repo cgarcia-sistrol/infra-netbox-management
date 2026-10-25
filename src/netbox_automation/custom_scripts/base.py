@@ -141,7 +141,9 @@ except ImportError:
     class MockModelBase:
         def __init__(self, **kwargs):
             self.id = kwargs.get("id", 1)
+            self.pk = kwargs.get("pk", self.id)
             self.tags = kwargs.get("tags", [])
+            self.custom_field_data = kwargs.get("custom_field_data", {})
             for k, v in kwargs.items():
                 setattr(self, k, v)
             self._saved = False

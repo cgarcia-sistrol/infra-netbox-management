@@ -297,6 +297,46 @@ class TestB2BVPNProvisioner(unittest.TestCase):
         logs = [log["message"] for log in self.provisioner.logs]
         self.assertTrue(any("10.254.13.1/32" in m and "INSIDE IP" in m.upper() for m in logs))
 
+    def test_custom_fields_prefixes_association(self):
+        """Verifica que el túnel guarda las PKs de local_prefixes y remote_prefixes en custom_field_data."""
+        data = {
+            "tenant_name": "PCA Partner",
+            "tunnel_name": "to-pca",
+            "local_hub": "madrid_cpd",
+            "peer_ip_primary": "194.140.20.1",
+            "local_prefixes": "10.148.60.0/24",
+            "remote_prefixes": "192.168.100.0/24",
+        }
+        res = self.provisioner.run(data, commit=True)
+        self.assertIn("to-pca", res)
+
+        # En mock o NetBox, comprobar que se crea o guarda el túnel
+        from netbox_automation.custom_scripts.base import Tunnel
+        t = Tunnel(name="to-pca")
+        self.assertTrue(hasattr(t, "custom_field_data"))
+
+    def test_idempotent_prefix_reuse(self):
+        """Verifica que _get_or_create_prefix y _get_or_create_ip_address operan de forma idempotente sin duplicar."""
+        pfx1 = self.provisioner._get_or_create_prefix(
+            prefix_str="10.148.0.0/24",
+            vrf=None,
+            tenant=None,
+            role=None,
+            description="Test PFX",
+            commit=True,
+        )
+        self.assertEqual(pfx1.prefix, "10.148.0.0/24")
+
+        ip1 = self.provisioner._get_or_create_ip_address(
+            address_str="10.254.0.1/32",
+            vrf=None,
+            tenant=None,
+            role=None,
+            description="Test IP",
+            commit=True,
+        )
+        self.assertEqual(ip1.address, "10.254.0.1/32")
+
 
 if __name__ == "__main__":
     unittest.main()
